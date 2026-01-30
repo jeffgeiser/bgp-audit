@@ -235,77 +235,117 @@
                     // Clear previous
                     d3.select('#tree-container').selectAll('*').remove();
 
-                    const margin = { top: 40, right: 200, bottom: 40, left: 200 };
                     const width = container.clientWidth || 1200;
-                    const height = 700;
-                    console.log('[Routing] Rendering tree', { width, height, peers: this.treeData.children?.length });
+                    // Calculate height based on number of peers (min 700, scale with peers)
+                    const peerCount = this.treeData.children?.length || 0;
+                    const height = Math.max(700, peerCount * 25);
+
+                    console.log('[Routing] Rendering tree', { width, height, peers: peerCount });
+
+                    const margin = { top: 40, right: 250, bottom: 40, left: 150 };
 
                     // Create SVG with zoom
                     this.svg = d3.select('#tree-container')
                         .append('svg')
                         .attr('width', width)
-                        .attr('height', height);
+                        .attr('height', height)
+                        .style('background', '#fafafa');
 
                     this.zoom = d3.zoom()
-                        .scaleExtent([0.3, 3])
+                        .scaleExtent([0.2, 3])
                         .on('zoom', (event) => {
-                            g.attr('transform', event.transform);
+                            this.gRef.attr('transform', event.transform);
                         });
 
                     this.svg.call(this.zoom);
 
-                    const g = this.svg.append('g')
+                    this.gRef = this.svg.append('g')
                         .attr('transform', `translate(${margin.left},${margin.top})`);
 
-                    // Create tree layout
-                    this.treemap = d3.tree().size([height - margin.top - margin.bottom, width - margin.left - margin.right]);
+                    // Create tree layout - swap dimensions for horizontal tree
+                    const innerWidth = width - margin.left - margin.right;
+                    const innerHeight = height - margin.top - margin.bottom;
+
+                    this.treemap = d3.tree().size([innerHeight, innerWidth]);
 
                     // Create hierarchy
                     this.root = d3.hierarchy(this.treeData, d => d.children);
-                    this.root.x0 = (height - margin.top - margin.bottom) / 2;
+                    this.root.x0 = innerHeight / 2;
                     this.root.y0 = 0;
 
-                    // Collapse children by default for large trees
+                    // Initially collapse peers with many children
                     if (this.root.children) {
                         this.root.children.forEach(child => {
-                            if (child.children && child.children.length > 10) {
+                            if (child.children && child.children.length > 5) {
                                 child._children = child.children;
                                 child.children = null;
                             }
                         });
                     }
 
-                    this.update(this.root, g);
+                    console.log('[Routing] Root hierarchy created', {
+                        rootChildren: this.root.children?.length,
+                        x0: this.root.x0,
+                        y0: this.root.y0
+                    });
+
+                    this.updateTree(this.root);
                 },
 
-                update(source, g) {
-                    const duration = 400;
+                updateTree(source) {
+                    const duration = 300;
                     const that = this;
+                    const g = this.gRef;
 
                     // Compute the new tree layout
                     const treeData = this.treemap(this.root);
                     const nodes = treeData.descendants();
                     const links = treeData.descendants().slice(1);
 
-                    // Normalize depth
-                    nodes.forEach(d => { d.y = d.depth * 280; });
+                    console.log('[Routing] Update called', { nodes: nodes.length, links: links.length });
 
-                    // Nodes
+                    // Normalize for fixed-depth (spread out horizontally)
+                    nodes.forEach(d => { d.y = d.depth * 350; });
+
+                    // ---- LINKS ----
+                    const link = g.selectAll('path.link')
+                        .data(links, d => d.id || (d.id = Math.random()));
+
+                    // Enter links
+                    const linkEnter = link.enter().insert('path', 'g')
+                        .attr('class', 'link')
+                        .attr('d', d => {
+                            const o = { x: source.x0 || 0, y: source.y0 || 0 };
+                            return this.diagonal(o, o);
+                        });
+
+                    // Update links
+                    linkEnter.merge(link)
+                        .transition()
+                        .duration(duration)
+                        .attr('d', d => this.diagonal(d, d.parent));
+
+                    // Remove old links
+                    link.exit()
+                        .transition()
+                        .duration(duration)
+                        .attr('d', d => {
+                            const o = { x: source.x, y: source.y };
+                            return this.diagonal(o, o);
+                        })
+                        .remove();
+
+                    // ---- NODES ----
                     const node = g.selectAll('g.node')
                         .data(nodes, d => d.id || (d.id = Math.random()));
 
                     // Enter nodes
                     const nodeEnter = node.enter().append('g')
-                        .attr('class', d => {
-                            let cls = 'node';
-                            if (d.depth === 0) cls += ' node-root';
-                            else if (d.depth === 1) cls += ' node-peer';
-                            else cls += ' node-downstream';
-                            if (d._children) cls += ' node-collapsed';
-                            return cls;
-                        })
-                        .attr('transform', d => `translate(${source.y0},${source.x0})`)
+                        .attr('class', d => 'node' + (d.depth === 0 ? ' node-root' : d.depth === 1 ? ' node-peer' : ' node-downstream'))
+                        .attr('transform', d => `translate(${source.y0 || 0},${source.x0 || 0})`)
+                        .style('cursor', 'pointer')
                         .on('click', (event, d) => {
+                            event.stopPropagation();
                             if (d.children) {
                                 d._children = d.children;
                                 d.children = null;
@@ -313,16 +353,16 @@
                                 d.children = d._children;
                                 d._children = null;
                             }
-                            that.update(d, g);
+                            that.updateTree(d);
                         })
                         .on('mouseover', (event, d) => {
                             const tooltip = document.getElementById('tooltip');
-                            let content = `<strong>${d.data.name}</strong>`;
+                            let content = `<strong>${d.data.name || 'Unknown'}</strong>`;
                             if (d.data.asn) content += `<br>ASN: ${d.data.asn}`;
                             if (d.data.info_type) content += `<br>Type: ${d.data.info_type}`;
                             if (d.data.irr_as_set) content += `<br>AS-SET: ${d.data.irr_as_set}`;
-                            if (d.data.children?.length) content += `<br>Downstream: ${d.data.children.length} ASNs`;
-
+                            const childCount = (d.children?.length || 0) + (d._children?.length || 0);
+                            if (childCount > 0) content += `<br>Children: ${childCount}`;
                             tooltip.innerHTML = content;
                             tooltip.style.display = 'block';
                             tooltip.style.left = (event.pageX + 15) + 'px';
@@ -332,73 +372,51 @@
                             document.getElementById('tooltip').style.display = 'none';
                         });
 
+                    // Add circles
                     nodeEnter.append('circle')
-                        .attr('r', d => d.depth === 0 ? 12 : (d.depth === 1 ? 8 : 5))
-                        .style('fill', d => d._children ? '#f1f5f9' : null);
+                        .attr('r', d => d.depth === 0 ? 14 : (d.depth === 1 ? 9 : 6))
+                        .style('stroke-width', '2px');
 
+                    // Add labels
                     nodeEnter.append('text')
                         .attr('dy', '.35em')
-                        .attr('x', d => d.children || d._children ? -15 : 15)
-                        .attr('text-anchor', d => d.children || d._children ? 'end' : 'start')
+                        .attr('x', d => (d.children || d._children) ? -18 : 18)
+                        .attr('text-anchor', d => (d.children || d._children) ? 'end' : 'start')
+                        .style('font-size', d => d.depth === 0 ? '13px' : '11px')
+                        .style('font-weight', d => d.depth <= 1 ? '600' : '400')
+                        .style('fill', '#1e293b')
                         .text(d => {
                             const name = d.data.name || `AS${d.data.asn}`;
-                            return name.length > 30 ? name.substring(0, 28) + '...' : name;
-                        })
-                        .style('fill', '#334155')
-                        .style('font-weight', d => d.depth === 0 ? '700' : (d.depth === 1 ? '600' : '400'));
-
-                    // Add child count badge for collapsed nodes
-                    nodeEnter.filter(d => d._children || (d.children && d.children.length > 0))
-                        .append('text')
-                        .attr('class', 'badge')
-                        .attr('dy', '0.35em')
-                        .attr('x', d => d.depth === 0 ? 20 : 12)
-                        .style('fill', '#64748b')
-                        .style('font-size', '9px')
-                        .text(d => {
-                            const count = d._children?.length || d.children?.length || 0;
-                            return count > 0 ? `(${count})` : '';
+                            return name.length > 35 ? name.substring(0, 33) + '...' : name;
                         });
 
-                    // Update
+                    // Add child count indicator
+                    nodeEnter.filter(d => d._children && d._children.length > 0)
+                        .append('text')
+                        .attr('dy', '.35em')
+                        .attr('x', 18)
+                        .style('font-size', '10px')
+                        .style('fill', '#64748b')
+                        .text(d => `(+${d._children.length})`);
+
+                    // Update: transition nodes to new position
                     const nodeUpdate = nodeEnter.merge(node);
 
                     nodeUpdate.transition()
                         .duration(duration)
                         .attr('transform', d => `translate(${d.y},${d.x})`);
 
-                    // Exit
-                    node.exit().transition()
+                    nodeUpdate.select('circle')
+                        .style('fill', d => d._children ? '#e2e8f0' : null);
+
+                    // Remove old nodes
+                    node.exit()
+                        .transition()
                         .duration(duration)
                         .attr('transform', d => `translate(${source.y},${source.x})`)
                         .remove();
 
-                    // Links
-                    const link = g.selectAll('path.link')
-                        .data(links, d => d.id);
-
-                    const linkEnter = link.enter().insert('path', 'g')
-                        .attr('class', 'link')
-                        .attr('d', d => {
-                            const o = { x: source.x0, y: source.y0 };
-                            return this.diagonal(o, o);
-                        });
-
-                    const linkUpdate = linkEnter.merge(link);
-
-                    linkUpdate.transition()
-                        .duration(duration)
-                        .attr('d', d => this.diagonal(d, d.parent));
-
-                    link.exit().transition()
-                        .duration(duration)
-                        .attr('d', d => {
-                            const o = { x: source.x, y: source.y };
-                            return this.diagonal(o, o);
-                        })
-                        .remove();
-
-                    // Store positions for transition
+                    // Store positions for next transition
                     nodes.forEach(d => {
                         d.x0 = d.x;
                         d.y0 = d.y;
@@ -431,7 +449,7 @@
                         if (d.children) d.children.forEach(expand);
                     };
                     expand(this.root);
-                    this.update(this.root, this.svg.select('g'));
+                    this.updateTree(this.root);
                 },
 
                 collapseAll() {
@@ -446,7 +464,7 @@
                     if (this.root.children) {
                         this.root.children.forEach(collapse);
                     }
-                    this.update(this.root, this.svg.select('g'));
+                    this.updateTree(this.root);
                 }
             };
         }
