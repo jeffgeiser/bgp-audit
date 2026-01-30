@@ -322,7 +322,7 @@
                     try {
                         let url = `/audit/api/discover?category=${this.viewMode}`;
                         if (this.isMarketScope) {
-                            url += `&city=${encodeURIComponent(this.selectedCity)}`;
+                            url += `&location=${encodeURIComponent(this.selectedCity)}`;
                         } else {
                             url += `&fac_id=${this.selectedFacId}`;
                         }
