@@ -215,26 +215,30 @@
                         this.peerCount = this.treeData.children?.length || 0;
                         this.downstreamCount = this.treeData.children?.reduce((acc, peer) => acc + (peer.children?.length || 0), 0) || 0;
 
-                        // Wait for DOM update then render
-                        await this.$nextTick();
-                        this.renderTree();
                     } catch (err) {
                         console.error('Error loading routing flow:', err);
                     } finally {
                         this.loading = false;
+                        // Wait for DOM to update after loading=false, then render
+                        await this.$nextTick();
+                        setTimeout(() => this.renderTree(), 50);
                     }
                 },
 
                 renderTree() {
                     const container = document.getElementById('tree-container');
-                    if (!container || !this.treeData) return;
+                    if (!container || !this.treeData) {
+                        console.log('[Routing] Container or data not ready', { container: !!container, treeData: !!this.treeData });
+                        return;
+                    }
 
                     // Clear previous
                     d3.select('#tree-container').selectAll('*').remove();
 
                     const margin = { top: 40, right: 200, bottom: 40, left: 200 };
-                    const width = container.clientWidth;
+                    const width = container.clientWidth || 1200;
                     const height = 700;
+                    console.log('[Routing] Rendering tree', { width, height, peers: this.treeData.children?.length });
 
                     // Create SVG with zoom
                     this.svg = d3.select('#tree-container')
