@@ -199,8 +199,14 @@
                 root: null,
                 treemap: null,
                 zoom: null,
+                gRef: null,
+
+                init() {
+                    console.log('[Routing] Alpine component initialized');
+                },
 
                 async loadRoutingFlow() {
+                    console.log('[Routing] loadRoutingFlow called', { city: this.selectedCity });
                     if (!this.selectedCity) return;
 
                     this.loading = true;
