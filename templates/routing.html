@@ -232,41 +232,56 @@
                 },
 
                 renderTree() {
-                    const container = document.getElementById('tree-container');
-                    if (!container || !this.treeData) {
-                        console.log('[Routing] Container or data not ready', { container: !!container, treeData: !!this.treeData });
-                        return;
-                    }
+                    try {
+                        console.log('[Routing] renderTree() called');
 
-                    // Clear previous
-                    d3.select('#tree-container').selectAll('*').remove();
+                        const container = document.getElementById('tree-container');
+                        console.log('[Routing] Container:', container);
 
-                    const width = container.clientWidth || 1200;
-                    // Calculate height based on number of peers (min 700, scale with peers)
-                    const peerCount = this.treeData.children?.length || 0;
-                    const height = Math.max(700, peerCount * 25);
+                        if (!container) {
+                            console.error('[Routing] Container not found!');
+                            return;
+                        }
 
-                    console.log('[Routing] Rendering tree', { width, height, peers: peerCount });
+                        if (!this.treeData) {
+                            console.error('[Routing] No tree data!');
+                            return;
+                        }
+
+                        // Clear previous
+                        d3.select('#tree-container').selectAll('*').remove();
+
+                        const width = container.clientWidth || container.offsetWidth || 1200;
+                        // Calculate height based on number of peers (min 700, scale with peers)
+                        const peerCount = this.treeData.children?.length || 0;
+                        const height = Math.max(700, peerCount * 25);
+
+                        console.log('[Routing] Dimensions:', { width, height, peers: peerCount, containerWidth: container.clientWidth, offsetWidth: container.offsetWidth });
 
                     const margin = { top: 40, right: 250, bottom: 40, left: 150 };
 
-                    // Create SVG with zoom
+                    // Create SVG
+                    console.log('[Routing] Creating SVG');
                     this.svg = d3.select('#tree-container')
                         .append('svg')
                         .attr('width', width)
                         .attr('height', height)
                         .style('background', '#fafafa');
 
+                    // Create group first (before zoom references it)
+                    this.gRef = this.svg.append('g')
+                        .attr('transform', `translate(${margin.left},${margin.top})`);
+
+                    // Now setup zoom
+                    const gRef = this.gRef; // Local reference for closure
                     this.zoom = d3.zoom()
                         .scaleExtent([0.2, 3])
                         .on('zoom', (event) => {
-                            this.gRef.attr('transform', event.transform);
+                            gRef.attr('transform', event.transform);
                         });
 
                     this.svg.call(this.zoom);
-
-                    this.gRef = this.svg.append('g')
-                        .attr('transform', `translate(${margin.left},${margin.top})`);
+                    console.log('[Routing] SVG created, gRef:', this.gRef);
 
                     // Create tree layout - swap dimensions for horizontal tree
                     const innerWidth = width - margin.left - margin.right;
@@ -296,6 +311,10 @@
                     });
 
                     this.updateTree(this.root);
+                    console.log('[Routing] renderTree() completed successfully');
+                    } catch (err) {
+                        console.error('[Routing] Error in renderTree:', err);
+                    }
                 },
 
                 updateTree(source) {
