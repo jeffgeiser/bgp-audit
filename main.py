@@ -119,9 +119,9 @@ async def dashboard_home(request: Request):
     """Serve the main dashboard UI."""
     return templates.TemplateResponse("index.html", {
         "request": request,
-        "metros": zenlayer_state["unique_metros"],
-        "cities": zenlayer_state["unique_cities"],
-        "facilities": zenlayer_state["unique_facilities"] if "unique_facilities" in zenlayer_state else zenlayer_state["facilities"]
+        "metros": zenlayer_state.get("unique_metros", []),
+        "cities": zenlayer_state.get("unique_cities", []),
+        "facilities": zenlayer_state.get("facilities", [])
     })
 
 @app.get("/settings", response_class=HTMLResponse)
