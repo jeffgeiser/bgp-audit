@@ -145,6 +145,13 @@ async def update_settings(new_config: Dict[str, Any]):
     initialize_footprint()
     return {"status": "success", "message": "Settings updated."}
 
+@app.post("/api/cache/clear")
+async def clear_cache():
+    """Clear discovery cache for debugging."""
+    _get_discovery_data.cache_clear()
+    print("[API] Discovery cache cleared")
+    return {"status": "success", "message": "Cache cleared."}
+
 @functools.lru_cache(maxsize=1024)
 def _get_discovery_data(fac_id: Optional[int], location_name: Optional[str], location_type: str, category: str):
     """Internal discovery logic with memoization for facility, city, or metro scope."""
@@ -166,7 +173,8 @@ def _get_discovery_data(fac_id: Optional[int], location_name: Optional[str], loc
         else:
             # location_type == "city"
             target_fac_ids = [f["id"] for f in zenlayer_state["facilities"] if f.get("city") == location_name]
-            
+            print(f"[Discovery] City '{location_name}': found {len(target_fac_ids)} facilities: {target_fac_ids}")
+
         if target_fac_ids:
             fac_query = ",".join(map(str, target_fac_ids))
             netfacs = fetch_peeringdb(f"netfac?fac_id__in={fac_query}")
@@ -209,12 +217,16 @@ def _get_discovery_data(fac_id: Optional[int], location_name: Optional[str], loc
 
 @app.get("/api/discover")
 async def discover_networks(
-    fac_id: Optional[int] = None, 
-    location: Optional[str] = None, 
-    location_type: str = "city", 
+    fac_id: Optional[int] = None,
+    location: Optional[str] = None,
+    location_type: str = "city",
     category: str = "upstream"
 ):
     try:
-        return _get_discovery_data(fac_id, location, location_type, category)
+        print(f"[API] /api/discover called: fac_id={fac_id}, location={location}, location_type={location_type}, category={category}")
+        result = _get_discovery_data(fac_id, location, location_type, category)
+        print(f"[API] Returning {len(result)} networks")
+        return result
     except Exception as e:
+        print(f"[API] Error: {e}")
         raise HTTPException(status_code=500, detail=str(e))
