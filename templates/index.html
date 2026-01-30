@@ -326,10 +326,13 @@
                         } else {
                             url += `&fac_id=${this.selectedFacId}`;
                         }
-                        
+
+                        console.log('[BGP Audit] Fetching:', url);
                         const response = await fetch(url);
-                        if (!response.ok) throw new Error('API Sync Error');
-                        this.networks = await response.json();
+                        if (!response.ok) throw new Error(`API Sync Error: ${response.status}`);
+                        const data = await response.json();
+                        console.log('[BGP Audit] Response:', data.length, 'networks');
+                        this.networks = data;
                     } catch (err) {
                         console.error('Audit Engine Failure:', err);
                     } finally {
