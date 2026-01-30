@@ -113,7 +113,21 @@ def initialize_footprint():
         zenlayer_state["unique_metros"] = sorted(list(metros))
     
     print(f"Zenlayer BGP Audit: Footprint loaded. ASNs: {asns}, Metros: {len(zenlayer_state['unique_metros'])}, Cities: {len(zenlayer_state['unique_cities'])}")
+@app.get("/", response_class=HTMLResponse)
+@app.get("", response_class=HTMLResponse)
+async def dashboard_home(request: Request):
+    """Serve the main dashboard UI."""
+    return templates.TemplateResponse("index.html", {
+        "request": request,
+        "metros": zenlayer_state["unique_metros"],
+        "cities": zenlayer_state["unique_cities"],
+        "facilities": zenlayer_state["unique_facilities"] if "unique_facilities" in zenlayer_state else zenlayer_state["facilities"]
+    })
 
+@app.get("/settings", response_class=HTMLResponse)
+async def settings_page(request: Request):
+    """Serve the settings editor UI."""
+    return templates.TemplateResponse("settings.html", {"request": request})
 @app.get("/api/settings")
 async def get_settings():
     """Return the current configuration plus all unique cities found in footprint."""
