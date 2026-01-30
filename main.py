@@ -230,3 +230,132 @@ async def discover_networks(
     except Exception as e:
         print(f"[API] Error: {e}")
         raise HTTPException(status_code=500, detail=str(e))
+
+@app.get("/routing", response_class=HTMLResponse)
+async def routing_flow_page(request: Request):
+    """Serve the hierarchical routing flow visualization page."""
+    return templates.TemplateResponse("routing.html", {
+        "request": request,
+        "cities": zenlayer_state.get("unique_cities", []),
+        "facilities": zenlayer_state.get("facilities", [])
+    })
+
+@functools.lru_cache(maxsize=256)
+def _expand_as_set(as_set: str) -> List[Dict[str, Any]]:
+    """
+    Expand an AS-SET to its member ASNs using IRR data.
+    Uses the RIPE WHOIS-style query via public API.
+    """
+    if not as_set or as_set == "":
+        return []
+
+    # Clean up the AS-SET name
+    as_set = as_set.strip().upper()
+
+    # Try to fetch from IRR Explorer API (publicly available)
+    try:
+        # Use bgpstuff.net API for AS-SET expansion (free, no auth required)
+        url = f"https://irrexplorer.nlnog.net/api/sets/member_of/{as_set}"
+        response = requests.get(url, timeout=10)
+        if response.status_code == 200:
+            data = response.json()
+            # Return list of member ASNs
+            members = []
+            for item in data.get("directMembers", [])[:50]:  # Limit to 50 for performance
+                if item.startswith("AS") and item[2:].isdigit():
+                    members.append({"asn": int(item[2:]), "name": item})
+            return members
+    except Exception as e:
+        print(f"[IRR] Error expanding {as_set}: {e}")
+
+    return []
+
+@app.get("/api/routing-flow")
+async def get_routing_flow(
+    location: str,
+    location_type: str = "city",
+    expand_sets: bool = False
+):
+    """
+    Build hierarchical routing flow data for visualization.
+
+    Structure:
+    - Root: Zenlayer ASNs
+    - Level 1: Direct peers at the location (transit/upstream providers)
+    - Level 2: (Optional) Expanded AS-SET members from each peer
+    """
+    try:
+        config = load_config()
+        zenlayer_asns = config.get("ASNS", DEFAULT_CONFIG["ASNS"])
+
+        # Get facilities for this location
+        target_fac_ids = []
+        if location_type == "city":
+            target_fac_ids = [f["id"] for f in zenlayer_state["facilities"] if f.get("city") == location]
+        else:
+            # Metro lookup
+            mapping = config.get("METRO_MAP", {})
+            cities_in_metro = [city for city, m in mapping.items() if m == location]
+            target_fac_ids = [f["id"] for f in zenlayer_state["facilities"] if f.get("city") in cities_in_metro]
+
+        if not target_fac_ids:
+            return {"error": "No facilities found for location"}
+
+        # Get all networks at these facilities
+        fac_query = ",".join(map(str, target_fac_ids))
+        netfacs = fetch_peeringdb(f"netfac?fac_id__in={fac_query}")
+        net_ids = list(set([nf["net_id"] for nf in netfacs]))
+
+        # Fetch network details
+        all_nets = []
+        batch_size = 50
+        for i in range(0, len(net_ids), batch_size):
+            chunk = net_ids[i:i + batch_size]
+            nets = fetch_peeringdb(f"net?id__in={','.join(map(str, chunk))}")
+            all_nets.extend(nets)
+
+        # Filter to transit/upstream providers (NSP or Transit types)
+        direct_peers = []
+        for net in all_nets:
+            # Skip Zenlayer's own ASNs
+            if net.get("asn") in zenlayer_asns:
+                continue
+
+            info_type = net.get("info_type", "")
+            is_nsp = info_type == "NSP"
+            is_transit = "Transit" in info_type
+
+            if is_nsp or is_transit:
+                peer_data = {
+                    "asn": net.get("asn"),
+                    "name": net.get("name"),
+                    "info_type": info_type,
+                    "irr_as_set": net.get("irr_as_set", ""),
+                    "children": []
+                }
+
+                # Optionally expand AS-SET
+                if expand_sets and peer_data["irr_as_set"]:
+                    # Take first AS-SET if multiple are listed
+                    as_set = peer_data["irr_as_set"].split()[0] if peer_data["irr_as_set"] else ""
+                    if as_set:
+                        peer_data["children"] = _expand_as_set(as_set)
+
+                direct_peers.append(peer_data)
+
+        # Sort by name
+        direct_peers.sort(key=lambda x: x["name"])
+
+        # Build the tree structure
+        tree = {
+            "name": f"Zenlayer ({', '.join(f'AS{asn}' for asn in zenlayer_asns)})",
+            "asn": zenlayer_asns[0],
+            "location": location,
+            "children": direct_peers
+        }
+
+        return tree
+
+    except Exception as e:
+        print(f"[API] Routing flow error: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
