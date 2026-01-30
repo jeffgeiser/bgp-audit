@@ -1,0 +1,5 @@
+{
+  "name": "Zenlayer BGP Peering & Provider Dashboard",
+  "description": "A high-performance BGP network discovery tool for Zenlayer (AS21859/AS4229) using PeeringDB data to identify peers and providers by city and facility.",
+  "requestFramePermissions": []
+}

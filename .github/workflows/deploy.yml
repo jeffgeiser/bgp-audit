@@ -1,0 +1,24 @@
+name: Deploy BGP Tool
+on:
+  push:
+    branches: [ main ]
+
+jobs:
+  deploy:
+    runs-on: self-hosted
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Sync and Restart
+        run: |
+          # 1. Sync files, excluding git and github metadata
+          sudo rsync -av --delete --exclude='.git*' ./ /var/www/dashboards/bgp-audit/
+
+          # 2. Fix permissions to ensure the web server can read the files
+          sudo chown -R zen:zen /var/www/dashboards/bgp-audit/
+
+          # 3. Rebuild and restart the container
+          cd /var/www/dashboards
+          sudo docker-compose up --build -d bgp-audit

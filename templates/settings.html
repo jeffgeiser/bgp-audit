@@ -1,0 +1,168 @@
+
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Zenlayer | Audit Settings</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script defer src="https://cdn.jsdelivr.net/npm/alpinejs@3.x.x/dist/cdn.min.js"></script>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap" rel="stylesheet">
+    <style>
+        [x-cloak] { display: none !important; }
+        body { font-family: 'Inter', sans-serif; background-color: #f8fafc; }
+        .custom-scrollbar::-webkit-scrollbar { width: 4px; }
+        .custom-scrollbar::-webkit-scrollbar-thumb { background: #cbd5e1; border-radius: 10px; }
+    </style>
+</head>
+<body class="flex flex-col min-h-screen text-slate-900" x-data="settingsPage()">
+    <!-- Header -->
+    <header class="bg-[#00205B] text-white py-6 px-10 shadow-lg flex justify-between items-center sticky top-0 z-50">
+        <div class="flex items-center space-x-4">
+            <div class="w-10 h-10 bg-[#00A9E0] rounded-lg flex items-center justify-center shadow-lg">
+                <svg class="w-6 h-6 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M10.325 4.317c.426-1.756 2.924-1.756 3.35 0a1.724 1.724 0 002.573 1.066c1.543-.94 3.31.826 2.37 2.37a1.724 1.724 0 001.065 2.572c1.756.426 1.756 2.924 0 3.35a1.724 1.724 0 00-1.066 2.573c.94 1.543-.826 3.31-2.37 2.37a1.724 1.724 0 00-2.572 1.065c-.426 1.756-2.924 1.756-3.35 0a1.724 1.724 0 00-2.573-1.066c-1.543.94-3.31-.826-2.37-2.37a1.724 1.724 0 00-1.065-2.572c-1.756-.426-1.756-2.924 0-3.35a1.724 1.724 0 001.066-2.573c-.94-1.543.826-3.31 2.37-2.37.996.608 2.296.07 2.572-1.065z" />
+                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z" />
+                </svg>
+            </div>
+            <div>
+                <h1 class="text-xl font-bold tracking-tight uppercase">Audit Settings</h1>
+                <p class="text-[10px] text-white/40 uppercase tracking-[0.2em] font-bold">Network Management Portal</p>
+            </div>
+        </div>
+        <a href="/audit" class="flex items-center space-x-2 bg-white/10 hover:bg-white/20 px-4 py-2 rounded-xl transition-all text-sm font-bold border border-white/10">
+            <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M3 12l2-2m0 0l7-7 7 7M5 10v10a1 1 0 001 1h3m10-11l2 2m-2-2v10a1 1 0 01-1 1h-3m-6 0a1 1 0 001-1v-4a1 1 0 011-1h2a1 1 0 011 1v4a1 1 0 001 1m-6 0h6" /></svg>
+            <span>Back to Dashboard</span>
+        </a>
+    </header>
+
+    <!-- Main Section -->
+    <main class="flex-1 p-10 max-w-5xl mx-auto w-full">
+        <div class="bg-white rounded-3xl border border-slate-200 shadow-xl overflow-hidden flex flex-col min-h-[600px]">
+            <div class="px-8 py-6 bg-slate-50/50 border-b border-slate-100 flex justify-between items-center">
+                <div>
+                    <h2 class="text-lg font-black text-[#00205B]">Configuration Editor</h2>
+                    <p class="text-xs text-slate-400 font-medium">Manage ASNs and Metro-to-Airport mappings via config.json</p>
+                </div>
+                <div class="flex items-center space-x-3">
+                    <button @click="validateJson()" class="px-4 py-2 bg-slate-200 hover:bg-slate-300 rounded-xl text-xs font-black text-slate-700 transition-all uppercase tracking-wider">Validate</button>
+                    <button @click="saveSettings()" :disabled="!isValid || saving" class="px-6 py-2 bg-[#00A9E0] hover:bg-[#008dbb] disabled:opacity-50 text-white rounded-xl text-xs font-black transition-all shadow-lg uppercase tracking-wider">
+                        <span x-show="!saving">Save Changes</span>
+                        <span x-show="saving">Saving...</span>
+                    </button>
+                </div>
+            </div>
+
+            <div class="flex-1 p-8 flex flex-col relative">
+                <!-- Status Messages -->
+                <div x-show="error" x-cloak x-transition class="mb-6 p-4 bg-red-50 border border-red-100 text-red-700 rounded-xl text-sm font-medium flex justify-between items-center">
+                    <span x-text="error"></span>
+                    <button @click="error = null" class="opacity-50 hover:opacity-100">×</button>
+                </div>
+                <div x-show="success" x-cloak x-transition class="mb-6 p-4 bg-emerald-50 border border-emerald-100 text-emerald-700 rounded-xl text-sm font-medium">
+                    Settings successfully updated and audit cache refreshed!
+                </div>
+
+                <div class="flex-1 relative border border-slate-200 rounded-2xl overflow-hidden shadow-inner">
+                    <div class="absolute top-2 right-4 text-[10px] font-bold text-slate-300 uppercase tracking-widest pointer-events-none">JSON RAW VIEW</div>
+                    <textarea 
+                        x-model="rawJson" 
+                        spellcheck="false"
+                        @input="onInput()"
+                        class="w-full h-full p-8 font-mono text-sm text-[#00205B] outline-none resize-none bg-slate-50 focus:bg-white transition-colors"
+                        placeholder="{ ... }"
+                    ></textarea>
+                </div>
+                
+                <div class="mt-4 flex items-center justify-between text-[10px] font-bold uppercase tracking-widest text-slate-400">
+                    <div class="flex items-center space-x-2">
+                        <div class="w-2 h-2 rounded-full" :class="isValid ? 'bg-emerald-400' : 'bg-red-400'"></div>
+                        <span x-text="isValid ? 'Valid JSON Format' : 'Invalid Syntax'"></span>
+                    </div>
+                    <div>Zenlayer Internal Config v1.0</div>
+                </div>
+            </div>
+        </div>
+
+        <div class="mt-10 grid grid-cols-2 gap-6">
+            <div class="bg-indigo-50 border border-indigo-100 p-6 rounded-2xl">
+                <h3 class="text-sm font-black text-indigo-900 uppercase tracking-widest mb-3">ASNs (List)</h3>
+                <p class="text-xs text-indigo-700 leading-relaxed font-medium">Adding an ASN here will cause the dashboard to automatically crawl PeeringDB for its facility footprint on the next refresh.</p>
+            </div>
+            <div class="bg-amber-50 border border-amber-100 p-6 rounded-2xl">
+                <h3 class="text-sm font-black text-amber-900 uppercase tracking-widest mb-3">Metro Mapping</h3>
+                <p class="text-xs text-amber-700 leading-relaxed font-medium">Mapping a City name to an Airport code (e.g. Ashburn: IAD) ensures the dashboard displays the correct metro codes next to facilities.</p>
+            </div>
+        </div>
+    </main>
+
+    <footer class="mt-auto py-8 text-center text-[10px] font-black text-slate-400 uppercase tracking-[0.3em]">
+        <p>BGP Peering Audit Management &bull; Zenlayer Global Operations</p>
+    </footer>
+
+    <script>
+        function settingsPage() {
+            return {
+                rawJson: '',
+                isValid: true,
+                saving: false,
+                error: null,
+                success: false,
+
+                async init() {
+                    try {
+                        const res = await fetch('/audit/api/settings');
+                        const data = await res.json();
+                        this.rawJson = JSON.stringify(data, null, 4);
+                    } catch (err) {
+                        this.error = "Failed to load current configuration.";
+                    }
+                },
+
+                onInput() {
+                    this.success = false;
+                    this.validateJson(false);
+                },
+
+                validateJson(showError = true) {
+                    try {
+                        JSON.parse(this.rawJson);
+                        this.isValid = true;
+                        this.error = null;
+                        return true;
+                    } catch (e) {
+                        this.isValid = false;
+                        if (showError) this.error = "Invalid JSON: " + e.message;
+                        return false;
+                    }
+                },
+
+                async saveSettings() {
+                    if (!this.validateJson()) return;
+                    
+                    this.saving = true;
+                    this.error = null;
+                    this.success = false;
+
+                    try {
+                        const response = await fetch('/audit/api/settings', {
+                            method: 'POST',
+                            headers: { 'Content-Type': 'application/json' },
+                            body: this.rawJson
+                        });
+
+                        if (!response.ok) throw new Error('Failed to update settings on server.');
+                        
+                        this.success = true;
+                        setTimeout(() => this.success = false, 5000);
+                    } catch (err) {
+                        this.error = err.message;
+                    } finally {
+                        this.saving = false;
+                    }
+                }
+            }
+        }
+    </script>
+</body>
+</html>
