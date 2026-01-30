@@ -21,4 +21,6 @@ jobs:
 
           # 3. Rebuild and restart the container
           cd /var/www/dashboards
-          sudo docker-compose up --build -d bgp-audit
+          # DO NOT RUN: docker-compose down
+          # RUN THIS INSTEAD:
+          sudo docker-compose up -d --build
