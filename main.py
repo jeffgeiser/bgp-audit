@@ -31,22 +31,7 @@ DEFAULT_CONFIG = {
     }
 }
 
-# Well-known Tier 1 transit providers (ASN -> short name)
-TIER1_PROVIDERS = {
-    174: "Cogent",
-    3356: "Lumen",
-    2914: "NTT",
-    1299: "Telia",
-    6461: "EIE",
-    3257: "GTT",
-    6762: "Telecom Italia Sparkle",
-    6830: "Liberty Global",
-    3491: "PCCW",
-    701: "Verizon",
-    7018: "AT&T",
-    1239: "Sprint",
-    12956: "Telefonica",
-}
+BGPVIEW_BASE = "https://api.bgpview.io"
 
 # ---------------------------------------------------------------------------
 # File-based JSON cache with 24-hour TTL
@@ -93,6 +78,50 @@ def clear_file_cache():
             except Exception:
                 pass
     print("[Cache] File cache cleared")
+
+def _fetch_bgp_peers(asn: int) -> set:
+    """
+    Fetch direct BGP peers for an ASN via BGPView.
+    Returns a set of peer ASNs (first-hop neighbors).
+    Results are cached to disk for 24 hours.
+    """
+    cache_key = _cache_key("bgp_peers", str(asn))
+    cached = _read_cache(cache_key)
+    if cached is not None:
+        return set(cached)
+
+    peer_asns = set()
+    try:
+        url = f"{BGPVIEW_BASE}/asn/{asn}/peers"
+        response = requests.get(url, timeout=15)
+        if response.status_code == 200:
+            data = response.json().get("data", {})
+            for p in data.get("ipv4_peers", []):
+                peer_asn = p.get("asn")
+                if peer_asn:
+                    peer_asns.add(peer_asn)
+            for p in data.get("ipv6_peers", []):
+                peer_asn = p.get("asn")
+                if peer_asn:
+                    peer_asns.add(peer_asn)
+    except Exception as e:
+        print(f"[BGPView] Error fetching peers for AS{asn}: {e}")
+
+    _write_cache(cache_key, list(peer_asns))
+    return peer_asns
+
+
+def _get_direct_peers(local_asns: List[int]) -> set:
+    """
+    Build the combined set of direct BGP peers across all local ASNs.
+    Excludes the local ASNs themselves from the result.
+    """
+    all_peers = set()
+    local_set = set(local_asns)
+    for asn in local_asns:
+        all_peers.update(_fetch_bgp_peers(asn))
+    return all_peers - local_set
+
 
 # Global app state
 zenlayer_state = {
@@ -310,17 +339,21 @@ async def discover_summary(
     location_type: str = "city",
     fac_id: Optional[int] = None
 ):
-    """Return a summary of network presence including neighbor highlights."""
+    """Return a summary of network presence including direct peer highlights."""
     try:
+        config = load_config()
+        zenlayer_asns = config.get("ASNS", DEFAULT_CONFIG["ASNS"])
+
         all_nets = _get_discovery_data(fac_id, location, location_type, "all")
         upstream = [n for n in all_nets if n["info_type"] == "NSP" or "Transit" in n["info_type"]]
         content = [n for n in all_nets if n["info_type"] in ("Content",)]
         eyeball = [n for n in all_nets if "Eyeball" in n["info_type"]]
 
-        # Identify Tier 1 neighbors present at this location
-        tier1_neighbors = [
-            {"asn": n["asn"], "name": n["name"], "label": TIER1_PROVIDERS[n["asn"]]}
-            for n in upstream if n["asn"] in TIER1_PROVIDERS
+        # Dynamically identify direct BGP peers
+        direct_peer_asns = _get_direct_peers(zenlayer_asns)
+        direct_neighbors = [
+            {"asn": n["asn"], "name": n["name"]}
+            for n in upstream if n["asn"] in direct_peer_asns
         ]
 
         return {
@@ -328,8 +361,8 @@ async def discover_summary(
             "upstream_count": len(upstream),
             "content_count": len(content),
             "eyeball_count": len(eyeball),
-            "tier1_neighbors": sorted(tier1_neighbors, key=lambda x: x["label"]),
-            "tier1_count": len(tier1_neighbors),
+            "direct_peers": sorted(direct_neighbors, key=lambda x: x["name"]),
+            "direct_peer_count": len(direct_neighbors),
         }
     except Exception as e:
         print(f"[API] Summary error: {e}")
@@ -419,13 +452,16 @@ async def get_routing_flow(
             nets = fetch_peeringdb(f"net?id__in={','.join(map(str, chunk))}")
             all_nets.extend(nets)
 
-        # Filter to transit/upstream providers (NSP or Transit types)
-        # Separate Tier 1 from Tier 2 providers
-        tier1_peers = []
-        tier2_peers = []
+        # Dynamically identify direct BGP peers via BGPView
+        direct_peer_asns = _get_direct_peers(zenlayer_asns)
+
+        # Classify peers: Direct Peer (first-hop BGP neighbor) vs Transit
+        direct_peers = []
+        transit_peers = []
 
         for net in all_nets:
-            if net.get("asn") in zenlayer_asns:
+            asn = net.get("asn")
+            if asn in zenlayer_asns:
                 continue
 
             info_type = net.get("info_type", "")
@@ -433,15 +469,14 @@ async def get_routing_flow(
             is_transit = "Transit" in info_type
 
             if is_nsp or is_transit:
-                asn = net.get("asn")
-                is_tier1 = asn in TIER1_PROVIDERS
+                is_direct = asn in direct_peer_asns
                 peer_data = {
                     "asn": asn,
                     "name": net.get("name"),
                     "info_type": info_type,
                     "irr_as_set": net.get("irr_as_set", ""),
-                    "tier": 1 if is_tier1 else 2,
-                    "tier1_label": TIER1_PROVIDERS.get(asn, ""),
+                    "is_direct": is_direct,
+                    "category": "Direct Peer" if is_direct else "Transit",
                     "children": []
                 }
 
@@ -450,22 +485,22 @@ async def get_routing_flow(
                     if as_set:
                         peer_data["children"] = _expand_as_set(as_set)
 
-                if is_tier1:
-                    tier1_peers.append(peer_data)
+                if is_direct:
+                    direct_peers.append(peer_data)
                 else:
-                    tier2_peers.append(peer_data)
+                    transit_peers.append(peer_data)
 
-        tier1_peers.sort(key=lambda x: x["name"])
-        tier2_peers.sort(key=lambda x: x["name"])
+        direct_peers.sort(key=lambda x: x["name"])
+        transit_peers.sort(key=lambda x: x["name"])
 
-        # Build the tree: Tier 1 providers first, then Tier 2
+        # Build the tree: Direct Peers first, then Transit
         tree = {
             "name": f"Zenlayer ({', '.join(f'AS{asn}' for asn in zenlayer_asns)})",
             "asn": zenlayer_asns[0],
             "location": location,
-            "tier1_count": len(tier1_peers),
-            "tier2_count": len(tier2_peers),
-            "children": tier1_peers + tier2_peers
+            "direct_peer_count": len(direct_peers),
+            "transit_count": len(transit_peers),
+            "children": direct_peers + transit_peers
         }
 
         return tree
