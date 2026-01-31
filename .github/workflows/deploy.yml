@@ -13,14 +13,18 @@ jobs:
 
       - name: Sync and Restart
         run: |
-          # 1. Sync files, excluding git and github metadata
+          # 1. Sync files specifically to the audit folder
           sudo rsync -av --delete --exclude='.git*' ./ /var/www/dashboards/bgp-audit/
 
-          # 2. Fix permissions to ensure the web server can read the files
+          # 2. Fix permissions
           sudo chown -R zen:zen /var/www/dashboards/bgp-audit/
 
-          # 3. Rebuild and restart the container
+          # 3. Targeted Restart
           cd /var/www/dashboards
-          # DO NOT RUN: docker-compose down
-          # RUN THIS INSTEAD:
-          sudo docker-compose up -d --build
+          
+          # Only rebuild and restart the SPECIFIC container to avoid port "zombies"
+          # This prevents docker-compose from touching other apps in the same file
+          sudo docker-compose up -d --build bgp-audit
+
+          # 4. Optional: Force Nginx to see the new container internal IP
+          sudo systemctl reload nginx
