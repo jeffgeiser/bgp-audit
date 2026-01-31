@@ -31,7 +31,6 @@ DEFAULT_CONFIG = {
     }
 }
 
-BGPVIEW_BASE = "https://api.bgpview.io"
 
 # ---------------------------------------------------------------------------
 # File-based JSON cache with 24-hour TTL
@@ -79,109 +78,136 @@ def clear_file_cache():
                 pass
     print("[Cache] File cache cleared")
 
-def _fetch_bgp_neighbors(asn: int) -> set:
-    """
-    Fetch all BGP neighbor ASNs for an ASN.
-    Uses BGPView /peers (all BGP neighbors) as the primary source, with
-    RIPEstat asn-neighbours as a fallback.  Results are cached for 24 hours.
+# ---------------------------------------------------------------------------
+# AS-Path Frequency Analysis helpers
+# ---------------------------------------------------------------------------
+RIPESTAT_BASE = "https://stat.ripe.net/data"
+_BGP_HEADERS = {"User-Agent": "bgp-audit/1.0"}
 
-    The /peers endpoint is used instead of /upstreams because large transit
-    providers like Zenlayer may report zero upstreams in BGPView while still
-    having hundreds of active BGP peers.
+
+def _fetch_as_path(asn: int) -> List[List[int]]:
     """
-    cache_key = _cache_key("bgp_neighbors", str(asn))
+    Fetch observed AS paths that traverse *asn* by looking up its announced
+    prefixes via RIPEstat and then pulling the AS-path for a sample prefix.
+
+    Returns a list of integer AS-path lists, e.g.
+        [[3356, 1299, 21859], [174, 1299, 21859], ...]
+
+    The full path data is cached per-ASN so repeat calls never hit the
+    network.
+    """
+    cache_key = _cache_key("aspath", str(asn))
     cached = _read_cache(cache_key)
     if cached is not None:
-        return set(cached)
+        return cached
 
-    neighbor_asns = set()
-    headers = {"User-Agent": "bgp-audit/1.0"}
+    paths: List[List[int]] = []
 
-    # --- Primary: BGPView /peers ---
+    # Step 1 – get announced prefixes for this ASN
+    prefixes = _fetch_prefixes_for_asn(asn)
+    if not prefixes:
+        _write_cache(cache_key, paths)
+        return paths
+
+    # Step 2 – pick a sample prefix (first one) and pull its looking-glass
+    sample_prefix = prefixes[0]
     try:
-        url = f"{BGPVIEW_BASE}/asn/{asn}/peers"
-        resp = requests.get(url, timeout=15, headers=headers)
+        url = (
+            f"{RIPESTAT_BASE}/looking-glass/data.json"
+            f"?resource={sample_prefix}"
+        )
+        resp = requests.get(url, timeout=20, headers=_BGP_HEADERS)
         if resp.status_code == 200 and resp.text.strip():
-            data = resp.json().get("data", {})
-            for p in data.get("ipv4_peers", []):
-                p_asn = p.get("asn")
-                if p_asn:
-                    neighbor_asns.add(p_asn)
-            for p in data.get("ipv6_peers", []):
-                p_asn = p.get("asn")
-                if p_asn:
-                    neighbor_asns.add(p_asn)
-            print(f"[BGPView] AS{asn} /peers returned {len(neighbor_asns)} neighbors")
+            rrcs = resp.json().get("data", {}).get("rrcs", [])
+            seen = set()
+            for rrc in rrcs:
+                for peer in rrc.get("peers", []):
+                    raw = peer.get("as_path", "")
+                    if not raw:
+                        continue
+                    try:
+                        int_path = [int(a) for a in raw.split()]
+                    except ValueError:
+                        continue
+                    path_key = tuple(int_path)
+                    if path_key not in seen:
+                        seen.add(path_key)
+                        paths.append(int_path)
+            print(f"[ASPath] AS{asn} prefix {sample_prefix}: {len(paths)} unique paths")
     except Exception as e:
-        print(f"[BGPView] Error fetching peers for AS{asn}: {e}")
+        print(f"[ASPath] Error fetching looking-glass for {sample_prefix}: {e}")
 
-    # --- Fallback: RIPEstat asn-neighbours ---
-    if not neighbor_asns:
-        try:
-            url = f"https://stat.ripe.net/data/asn-neighbours/data.json?resource=AS{asn}"
-            resp = requests.get(url, timeout=15, headers=headers)
-            if resp.status_code == 200 and resp.text.strip():
-                data = resp.json().get("data", {})
-                for n in data.get("neighbours", []):
-                    n_asn = n.get("asn")
-                    if n_asn:
-                        neighbor_asns.add(n_asn)
-                print(f"[RIPEstat] AS{asn} returned {len(neighbor_asns)} neighbors (fallback)")
-        except Exception as e:
-            print(f"[RIPEstat] Error fetching neighbors for AS{asn}: {e}")
-
-    if not neighbor_asns:
-        print(f"[BGP] WARNING: No neighbors found for AS{asn} from any source")
-
-    _write_cache(cache_key, list(neighbor_asns))
-    return neighbor_asns
+    _write_cache(cache_key, paths)
+    return paths
 
 
-def _get_direct_peers(local_asns: List[int]) -> set:
+def _fetch_prefixes_for_asn(asn: int) -> List[str]:
+    """Return a list of prefixes originated by *asn* (cached)."""
+    cache_key = _cache_key("pfx", str(asn))
+    cached = _read_cache(cache_key)
+    if cached is not None:
+        return cached
+
+    prefixes: List[str] = []
+    try:
+        url = f"{RIPESTAT_BASE}/announced-prefixes/data.json?resource=AS{asn}"
+        resp = requests.get(url, timeout=15, headers=_BGP_HEADERS)
+        if resp.status_code == 200 and resp.text.strip():
+            for p in resp.json().get("data", {}).get("prefixes", []):
+                pfx = p.get("prefix")
+                if pfx:
+                    prefixes.append(pfx)
+    except Exception as e:
+        print(f"[ASPath] Error fetching prefixes for AS{asn}: {e}")
+
+    _write_cache(cache_key, prefixes)
+    return prefixes
+
+
+def _extract_first_hop(as_path: List[int], local_asns: set) -> Optional[int]:
     """
-    Build the set of ASNs that have a direct BGP session with any of our
-    local ASNs.  The caller is expected to filter the result against the
-    facility network list so that only co-located peers remain.
+    Walk an AS path (ordered origin → collector) and return the ASN that
+    appears immediately *before* any local ASN.  BGP paths are recorded
+    collector-side so the order is [collector … transit … first_hop, local].
+
+    Example (local = {21859}):
+        [3356, 1299, 21859]  → 1299   (1299 hands traffic to 21859)
+        [174, 21859]         → 174
+        [21859]              → None   (only local)
+    """
+    for i, asn in enumerate(as_path):
+        if asn in local_asns and i > 0:
+            candidate = as_path[i - 1]
+            if candidate not in local_asns:
+                return candidate
+    return None
+
+
+def _analyze_facility_paths(
+    facility_asns: List[int],
+    local_asns: List[int],
+) -> Dict[int, int]:
+    """
+    For every ASN present at a facility, fetch its AS-path data and extract
+    the first hop immediately adjacent to Zenlayer.
+
+    Returns {facility_asn: first_hop_asn} for every ASN where a first hop
+    was found.
     """
     local_set = set(local_asns)
-    direct_asns = set()
-    for asn in local_asns:
-        neighbors = _fetch_bgp_neighbors(asn)
-        direct_asns.update(neighbors - local_set)
-    print(f"[BGP] Total direct peer ASNs across {len(local_asns)} local ASNs: {len(direct_asns)}")
-    return direct_asns
+    first_hops: Dict[int, int] = {}
 
+    for asn in facility_asns:
+        if asn in local_set:
+            continue
+        paths = _fetch_as_path(asn)
+        for path in paths:
+            hop = _extract_first_hop(path, local_set)
+            if hop is not None:
+                first_hops[asn] = hop
+                break  # one confirmed hop is enough per destination ASN
 
-def _fetch_downstreams(asn: int) -> set:
-    """
-    Fetch downstream ASNs for a network via BGPView.
-    These are networks that transit through this ASN — i.e. the connections
-    this peer provides. Results are cached to disk for 24 hours.
-    """
-    cache_key = _cache_key("bgp_down", str(asn))
-    cached = _read_cache(cache_key)
-    if cached is not None:
-        return set(cached)
-
-    downstream_asns = set()
-    try:
-        url = f"{BGPVIEW_BASE}/asn/{asn}/downstreams"
-        response = requests.get(url, timeout=15, headers={"User-Agent": "bgp-audit/1.0"})
-        if response.status_code == 200:
-            data = response.json().get("data", {})
-            for d in data.get("ipv4_downstreams", []):
-                d_asn = d.get("asn")
-                if d_asn:
-                    downstream_asns.add(d_asn)
-            for d in data.get("ipv6_downstreams", []):
-                d_asn = d.get("asn")
-                if d_asn:
-                    downstream_asns.add(d_asn)
-    except Exception as e:
-        print(f"[BGPView] Error fetching downstreams for AS{asn}: {e}")
-
-    _write_cache(cache_key, list(downstream_asns))
-    return downstream_asns
+    return first_hops
 
 
 # Global app state
@@ -195,7 +221,7 @@ zenlayer_state = {
 
 def load_config() -> Dict[str, Any]:
     """Load configuration from file or create default if missing."""
-    if not os.path.exists(CONFIG_FILE):
+    if not os.path.exists(CONFIG_FILE) or os.path.getsize(CONFIG_FILE) == 0:
         with open(CONFIG_FILE, 'w') as f:
             json.dump(DEFAULT_CONFIG, f, indent=4)
         return DEFAULT_CONFIG
@@ -410,11 +436,14 @@ async def discover_summary(
         content = [n for n in all_nets if n["info_type"] in ("Content",)]
         eyeball = [n for n in all_nets if "Eyeball" in n["info_type"]]
 
-        # Dynamically identify direct BGP peers
-        direct_peer_asns = _get_direct_peers(zenlayer_asns)
+        # AS-Path analysis: find direct peers among all facility networks
+        all_asns = [n["asn"] for n in all_nets if n.get("asn")]
+        first_hops = _analyze_facility_paths(all_asns, zenlayer_asns)
+        direct_peer_asns = set(first_hops.values())
+
         direct_neighbors = [
             {"asn": n["asn"], "name": n["name"]}
-            for n in upstream if n["asn"] in direct_peer_asns
+            for n in all_nets if n["asn"] in direct_peer_asns
         ]
 
         return {
@@ -476,14 +505,19 @@ async def get_routing_flow(
     expand_sets: bool = False
 ):
     """
-    Build hierarchical routing flow data for visualization.
+    Build hierarchical routing flow data using AS-Path Frequency Analysis.
 
-    Structure:
-    - Level 0 (Root): Zenlayer ASNs
-    - Level 1: Direct peers — first-hop neighbors from AS path analysis
-    - Level 2: Networks at this facility that route through each direct peer
-    - Level 1 (also): Remaining NSP/Transit networks not reached via any
-      detected direct peer (shown as "Transit")
+    For every network at a facility we fetch real AS-path data via RIPEstat
+    and extract the first hop adjacent to Zenlayer.  Networks are then
+    grouped into a 3-level tree:
+
+      Level 0 (Root)  – Zenlayer (AS21859 / AS4229)
+      Level 1         – Direct Peers: ASNs that appear as the first hop
+                        adjacent to a Zenlayer ASN in any observed path
+      Level 2         – Downstream: facility networks whose first hop is
+                        one of the Level-1 Direct Peers
+      Level 1 (also)  – Unresolved: networks where no Zenlayer-adjacent
+                        hop was found (shown as "Transit")
     """
     try:
         config = load_config()
@@ -522,76 +556,83 @@ async def get_routing_flow(
                 facility_nets[asn] = net
 
         # ------------------------------------------------------------------
-        # Level 1: Identify first-hop neighbors via AS path analysis
+        # AS-Path Frequency Analysis
+        # For each facility ASN, fetch paths and find the first hop adjacent
+        # to Zenlayer.  Result: {destination_asn: first_hop_asn}
         # ------------------------------------------------------------------
-        direct_peer_asns = _get_direct_peers(zenlayer_asns)
-
-        direct_peer_nodes = {}
-        for asn in direct_peer_asns:
-            if asn in facility_nets:
-                net = facility_nets[asn]
-                direct_peer_nodes[asn] = {
-                    "asn": asn,
-                    "name": net.get("name"),
-                    "info_type": net.get("info_type", ""),
-                    "irr_as_set": net.get("irr_as_set", ""),
-                    "is_direct": True,
-                    "category": "Direct Peer",
-                    "children": []
-                }
+        first_hops = _analyze_facility_paths(
+            list(facility_nets.keys()), zenlayer_asns
+        )
+        print(f"[RoutingFlow] {location}: {len(first_hops)}/{len(facility_nets)} ASNs resolved a first hop")
 
         # ------------------------------------------------------------------
-        # Level 2: For each direct peer, find their downstream networks
-        # that are ALSO present at this facility
+        # Majority-Hop Grouping
+        # Any ASN that appears as a first_hop for at least one facility
+        # network is promoted to Level 1 (Direct Peer).  Every destination
+        # that routes through it becomes its Level 2 child.
         # ------------------------------------------------------------------
-        assigned_asns = set(direct_peer_nodes.keys()) | local_set
+        # Collect {hop_asn: [dest_asn, ...]}
+        hop_to_dests: Dict[int, List[int]] = {}
+        for dest_asn, hop_asn in first_hops.items():
+            hop_to_dests.setdefault(hop_asn, []).append(dest_asn)
 
-        for peer_asn, peer_node in direct_peer_nodes.items():
-            downstream_asns = _fetch_downstreams(peer_asn)
+        direct_peer_nodes: Dict[int, dict] = {}
+        assigned_asns = set(local_set)
 
-            # Optionally merge in AS-SET expansion members
-            if expand_sets:
-                irr_as_set = peer_node.get("irr_as_set", "")
-                if irr_as_set:
-                    as_set = irr_as_set.split()[0]
-                    if as_set:
-                        for m in _expand_as_set(as_set):
-                            downstream_asns.add(m["asn"])
+        for hop_asn, dest_asns in hop_to_dests.items():
+            # Build the Direct Peer node
+            if hop_asn in facility_nets:
+                net = facility_nets[hop_asn]
+                name = net.get("name", f"AS{hop_asn}")
+                info_type = net.get("info_type", "")
+            else:
+                name = f"AS{hop_asn}"
+                info_type = "NSP"
 
-            # Match downstream ASNs against facility networks
-            for asn, net in facility_nets.items():
-                if asn in assigned_asns:
+            children = []
+            for d_asn in sorted(dest_asns):
+                if d_asn == hop_asn or d_asn in local_set:
                     continue
-                if asn in downstream_asns:
-                    peer_node["children"].append({
-                        "asn": asn,
-                        "name": net.get("name"),
-                        "info_type": net.get("info_type", ""),
+                d_net = facility_nets.get(d_asn)
+                if d_net:
+                    children.append({
+                        "asn": d_asn,
+                        "name": d_net.get("name", f"AS{d_asn}"),
+                        "info_type": d_net.get("info_type", ""),
                         "is_direct": False,
                         "category": "Downstream",
                     })
-                    assigned_asns.add(asn)
+                    assigned_asns.add(d_asn)
 
-            peer_node["children"].sort(key=lambda x: x["name"])
+            children.sort(key=lambda x: x["name"])
+
+            direct_peer_nodes[hop_asn] = {
+                "asn": hop_asn,
+                "name": name,
+                "info_type": info_type,
+                "is_direct": True,
+                "category": "Direct Peer",
+                "children": children,
+            }
+            assigned_asns.add(hop_asn)
 
         # ------------------------------------------------------------------
-        # Remaining unassigned NSP/Transit networks → Level 1 as "Transit"
+        # Unresolved networks → Level 1 as "Transit"
+        # These are facility networks where no Zenlayer-adjacent hop was
+        # found in the observed AS paths.
         # ------------------------------------------------------------------
         transit_nodes = []
         for asn, net in facility_nets.items():
             if asn in assigned_asns:
                 continue
-            info_type = net.get("info_type", "")
-            if info_type == "NSP" or "Transit" in info_type:
-                transit_nodes.append({
-                    "asn": asn,
-                    "name": net.get("name"),
-                    "info_type": info_type,
-                    "irr_as_set": net.get("irr_as_set", ""),
-                    "is_direct": False,
-                    "category": "Transit",
-                    "children": []
-                })
+            transit_nodes.append({
+                "asn": asn,
+                "name": net.get("name", f"AS{asn}"),
+                "info_type": net.get("info_type", ""),
+                "is_direct": False,
+                "category": "Transit",
+                "children": []
+            })
 
         direct_list = sorted(direct_peer_nodes.values(), key=lambda x: x["name"])
         transit_nodes.sort(key=lambda x: x["name"])
