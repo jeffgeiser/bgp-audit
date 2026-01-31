@@ -138,6 +138,72 @@
             </div>
         </header>
 
+        <!-- Neighbor Summary Bar -->
+        <div x-show="summary" x-cloak class="bg-white rounded-2xl border border-slate-200 shadow-sm overflow-hidden">
+            <div class="px-8 py-5 flex flex-wrap items-center gap-6">
+                <!-- Stat chips -->
+                <div class="flex items-center gap-2">
+                    <div class="w-9 h-9 rounded-xl bg-[#00205B] flex items-center justify-center">
+                        <svg class="w-4 h-4 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13 10V3L4 14h7v7l9-11h-7z" /></svg>
+                    </div>
+                    <div>
+                        <p class="text-[10px] font-black text-slate-400 uppercase tracking-wider">Total Networks</p>
+                        <p class="text-lg font-black text-[#00205B] leading-tight" x-text="summary?.total || 0"></p>
+                    </div>
+                </div>
+
+                <div class="w-px h-10 bg-slate-200"></div>
+
+                <div class="flex items-center gap-2">
+                    <div class="w-9 h-9 rounded-xl bg-amber-100 flex items-center justify-center">
+                        <svg class="w-4 h-4 text-amber-700" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 3v4M3 5h4M6 17v4m-2-2h4m5-16l2.286 6.857L21 12l-5.714 2.143L13 21l-2.286-6.857L5 12l5.714-2.143L13 3z" /></svg>
+                    </div>
+                    <div>
+                        <p class="text-[10px] font-black text-slate-400 uppercase tracking-wider">Tier 1 Neighbors</p>
+                        <p class="text-lg font-black text-amber-700 leading-tight" x-text="summary?.tier1_count || 0"></p>
+                    </div>
+                </div>
+
+                <div class="w-px h-10 bg-slate-200"></div>
+
+                <div class="flex items-center gap-2">
+                    <div class="w-9 h-9 rounded-xl bg-blue-100 flex items-center justify-center">
+                        <svg class="w-4 h-4 text-[#00A9E0]" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M8 7h12m0 0l-4-4m4 4l-4 4m0 6H4m0 0l4 4m-4-4l4-4" /></svg>
+                    </div>
+                    <div>
+                        <p class="text-[10px] font-black text-slate-400 uppercase tracking-wider">Upstream</p>
+                        <p class="text-lg font-black text-[#00A9E0] leading-tight" x-text="summary?.upstream_count || 0"></p>
+                    </div>
+                </div>
+
+                <div class="w-px h-10 bg-slate-200"></div>
+
+                <div class="flex items-center gap-2">
+                    <div class="w-9 h-9 rounded-xl bg-emerald-100 flex items-center justify-center">
+                        <svg class="w-4 h-4 text-emerald-600" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 11H5m14 0a2 2 0 012 2v6a2 2 0 01-2 2H5a2 2 0 01-2-2v-6a2 2 0 012-2m14 0V9a2 2 0 00-2-2M5 11V9a2 2 0 012-2m0 0V5a2 2 0 012-2h6a2 2 0 012 2v2M7 7h10" /></svg>
+                    </div>
+                    <div>
+                        <p class="text-[10px] font-black text-slate-400 uppercase tracking-wider">Content</p>
+                        <p class="text-lg font-black text-emerald-600 leading-tight" x-text="summary?.content_count || 0"></p>
+                    </div>
+                </div>
+
+                <!-- Tier 1 neighbor badges -->
+                <template x-if="summary?.tier1_neighbors?.length > 0">
+                    <div class="ml-auto flex items-center gap-2 flex-wrap">
+                        <span class="text-[10px] font-black text-slate-400 uppercase tracking-wider mr-1">Direct Tier 1:</span>
+                        <template x-for="t1 in summary.tier1_neighbors" :key="t1.asn">
+                            <span class="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-full bg-amber-50 border border-amber-200 text-xs font-bold text-amber-800">
+                                <span class="w-1.5 h-1.5 rounded-full bg-amber-400"></span>
+                                <span x-text="t1.label"></span>
+                                <span class="text-amber-500 font-mono text-[10px]" x-text="'AS' + t1.asn"></span>
+                            </span>
+                        </template>
+                    </div>
+                </template>
+            </div>
+        </div>
+
         <!-- Result Table Container -->
         <div class="flex-1 bg-white rounded-3xl border border-slate-200 shadow-xl shadow-slate-200/50 overflow-hidden flex flex-col">
             <!-- Table Action Bar -->
@@ -250,6 +316,7 @@
                 networks: [],
                 searchQuery: '',
                 loading: false,
+                summary: null,
 
                 get filteredFacilities() {
                     if (!this.selectedCity) return [];
@@ -293,6 +360,7 @@
                     } else {
                         this.isMarketScope = false;
                         this.networks = [];
+                        this.summary = null;
                     }
                 },
 
@@ -325,18 +393,28 @@
                     this.networks = [];
                     try {
                         let url = `/audit/api/discover?category=${this.viewMode}`;
+                        let summaryUrl = `/audit/api/discover/summary?`;
                         if (this.isMarketScope) {
                             url += `&location=${encodeURIComponent(this.selectedCity)}`;
+                            summaryUrl += `location=${encodeURIComponent(this.selectedCity)}`;
                         } else {
                             url += `&fac_id=${this.selectedFacId}`;
+                            summaryUrl += `fac_id=${this.selectedFacId}`;
                         }
 
                         console.log('[BGP Audit] Fetching:', url);
-                        const response = await fetch(url);
+                        const [response, summaryResponse] = await Promise.all([
+                            fetch(url),
+                            fetch(summaryUrl)
+                        ]);
                         if (!response.ok) throw new Error(`API Sync Error: ${response.status}`);
                         const data = await response.json();
                         console.log('[BGP Audit] Response:', data.length, 'networks');
                         this.networks = data;
+
+                        if (summaryResponse.ok) {
+                            this.summary = await summaryResponse.json();
+                        }
                     } catch (err) {
                         console.error('Audit Engine Failure:', err);
                     } finally {

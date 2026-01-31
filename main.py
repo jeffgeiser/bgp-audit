@@ -1,6 +1,8 @@
 
 import os
 import json
+import time
+import hashlib
 import requests
 import functools
 from fastapi import FastAPI, Request, HTTPException
@@ -29,6 +31,69 @@ DEFAULT_CONFIG = {
     }
 }
 
+# Well-known Tier 1 transit providers (ASN -> short name)
+TIER1_PROVIDERS = {
+    174: "Cogent",
+    3356: "Lumen",
+    2914: "NTT",
+    1299: "Telia",
+    6461: "EIE",
+    3257: "GTT",
+    6762: "Telecom Italia Sparkle",
+    6830: "Liberty Global",
+    3491: "PCCW",
+    701: "Verizon",
+    7018: "AT&T",
+    1239: "Sprint",
+    12956: "Telefonica",
+}
+
+# ---------------------------------------------------------------------------
+# File-based JSON cache with 24-hour TTL
+# ---------------------------------------------------------------------------
+CACHE_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), ".api_cache")
+CACHE_TTL = 86400  # 24 hours in seconds
+
+def _cache_key(prefix: str, value: str) -> str:
+    """Generate a filesystem-safe cache key."""
+    h = hashlib.sha256(value.encode()).hexdigest()[:16]
+    return f"{prefix}_{h}"
+
+def _read_cache(key: str):
+    """Read a cached value if it exists and hasn't expired."""
+    path = os.path.join(CACHE_DIR, f"{key}.json")
+    if not os.path.exists(path):
+        return None
+    try:
+        with open(path, "r") as f:
+            entry = json.load(f)
+        if time.time() - entry.get("ts", 0) > CACHE_TTL:
+            os.remove(path)
+            return None
+        return entry["data"]
+    except Exception:
+        return None
+
+def _write_cache(key: str, data):
+    """Write a value to the file cache."""
+    os.makedirs(CACHE_DIR, exist_ok=True)
+    path = os.path.join(CACHE_DIR, f"{key}.json")
+    try:
+        with open(path, "w") as f:
+            json.dump({"ts": time.time(), "data": data}, f)
+    except Exception as e:
+        print(f"[Cache] Write error for {key}: {e}")
+
+def clear_file_cache():
+    """Remove all entries from the file cache."""
+    if os.path.isdir(CACHE_DIR):
+        for fname in os.listdir(CACHE_DIR):
+            try:
+                os.remove(os.path.join(CACHE_DIR, fname))
+            except Exception:
+                pass
+    print("[Cache] File cache cleared")
+
 # Global app state
 zenlayer_state = {
     "networks": [],
@@ -56,15 +121,22 @@ def save_config(data: Dict[str, Any]):
     with open(CONFIG_FILE, 'w') as f:
         json.dump(data, f, indent=4)
 
-@functools.lru_cache(maxsize=128)
 def fetch_peeringdb(endpoint: str) -> List[Dict[str, Any]]:
-    """Fetches data from PeeringDB with memoization."""
+    """Fetches data from PeeringDB with 24-hour file cache."""
     clean_endpoint = endpoint.strip("/")
+    cache_key = _cache_key("pdb", clean_endpoint)
+
+    cached = _read_cache(cache_key)
+    if cached is not None:
+        return cached
+
     url = f"{PEERINGDB_BASE}/{clean_endpoint}"
     try:
         response = requests.get(url, timeout=10)
         response.raise_for_status()
-        return response.json().get("data", [])
+        data = response.json().get("data", [])
+        _write_cache(cache_key, data)
+        return data
     except requests.exceptions.RequestException as e:
         print(f"PeeringDB API Error: {e}")
         return []
@@ -140,16 +212,17 @@ async def get_settings():
 async def update_settings(new_config: Dict[str, Any]):
     """Update configuration and re-initialize state."""
     save_config(new_config)
-    fetch_peeringdb.cache_clear()
+    clear_file_cache()
     _get_discovery_data.cache_clear()
     initialize_footprint()
     return {"status": "success", "message": "Settings updated."}
 
 @app.post("/api/cache/clear")
 async def clear_cache():
-    """Clear discovery cache for debugging."""
+    """Clear all caches (file + in-memory) for debugging."""
+    clear_file_cache()
     _get_discovery_data.cache_clear()
-    print("[API] Discovery cache cleared")
+    print("[API] All caches cleared")
     return {"status": "success", "message": "Cache cleared."}
 
 @functools.lru_cache(maxsize=1024)
@@ -231,6 +304,37 @@ async def discover_networks(
         print(f"[API] Error: {e}")
         raise HTTPException(status_code=500, detail=str(e))
 
+@app.get("/api/discover/summary")
+async def discover_summary(
+    location: Optional[str] = None,
+    location_type: str = "city",
+    fac_id: Optional[int] = None
+):
+    """Return a summary of network presence including neighbor highlights."""
+    try:
+        all_nets = _get_discovery_data(fac_id, location, location_type, "all")
+        upstream = [n for n in all_nets if n["info_type"] == "NSP" or "Transit" in n["info_type"]]
+        content = [n for n in all_nets if n["info_type"] in ("Content",)]
+        eyeball = [n for n in all_nets if "Eyeball" in n["info_type"]]
+
+        # Identify Tier 1 neighbors present at this location
+        tier1_neighbors = [
+            {"asn": n["asn"], "name": n["name"], "label": TIER1_PROVIDERS[n["asn"]]}
+            for n in upstream if n["asn"] in TIER1_PROVIDERS
+        ]
+
+        return {
+            "total": len(all_nets),
+            "upstream_count": len(upstream),
+            "content_count": len(content),
+            "eyeball_count": len(eyeball),
+            "tier1_neighbors": sorted(tier1_neighbors, key=lambda x: x["label"]),
+            "tier1_count": len(tier1_neighbors),
+        }
+    except Exception as e:
+        print(f"[API] Summary error: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
 @app.get("/routing", response_class=HTMLResponse)
 async def routing_flow_page(request: Request):
     """Serve the hierarchical routing flow visualization page."""
@@ -240,30 +344,31 @@ async def routing_flow_page(request: Request):
         "facilities": zenlayer_state.get("facilities", [])
     })
 
-@functools.lru_cache(maxsize=256)
 def _expand_as_set(as_set: str) -> List[Dict[str, Any]]:
     """
     Expand an AS-SET to its member ASNs using IRR data.
-    Uses the RIPE WHOIS-style query via public API.
+    Results are cached to disk for 24 hours.
     """
     if not as_set or as_set == "":
         return []
 
-    # Clean up the AS-SET name
     as_set = as_set.strip().upper()
+    cache_key = _cache_key("irr", as_set)
 
-    # Try to fetch from IRR Explorer API (publicly available)
+    cached = _read_cache(cache_key)
+    if cached is not None:
+        return cached
+
     try:
-        # Use bgpstuff.net API for AS-SET expansion (free, no auth required)
         url = f"https://irrexplorer.nlnog.net/api/sets/member_of/{as_set}"
         response = requests.get(url, timeout=10)
         if response.status_code == 200:
             data = response.json()
-            # Return list of member ASNs
             members = []
-            for item in data.get("directMembers", [])[:50]:  # Limit to 50 for performance
+            for item in data.get("directMembers", [])[:50]:
                 if item.startswith("AS") and item[2:].isdigit():
                     members.append({"asn": int(item[2:]), "name": item})
+            _write_cache(cache_key, members)
             return members
     except Exception as e:
         print(f"[IRR] Error expanding {as_set}: {e}")
@@ -315,9 +420,11 @@ async def get_routing_flow(
             all_nets.extend(nets)
 
         # Filter to transit/upstream providers (NSP or Transit types)
-        direct_peers = []
+        # Separate Tier 1 from Tier 2 providers
+        tier1_peers = []
+        tier2_peers = []
+
         for net in all_nets:
-            # Skip Zenlayer's own ASNs
             if net.get("asn") in zenlayer_asns:
                 continue
 
@@ -326,32 +433,39 @@ async def get_routing_flow(
             is_transit = "Transit" in info_type
 
             if is_nsp or is_transit:
+                asn = net.get("asn")
+                is_tier1 = asn in TIER1_PROVIDERS
                 peer_data = {
-                    "asn": net.get("asn"),
+                    "asn": asn,
                     "name": net.get("name"),
                     "info_type": info_type,
                     "irr_as_set": net.get("irr_as_set", ""),
+                    "tier": 1 if is_tier1 else 2,
+                    "tier1_label": TIER1_PROVIDERS.get(asn, ""),
                     "children": []
                 }
 
-                # Optionally expand AS-SET
                 if expand_sets and peer_data["irr_as_set"]:
-                    # Take first AS-SET if multiple are listed
                     as_set = peer_data["irr_as_set"].split()[0] if peer_data["irr_as_set"] else ""
                     if as_set:
                         peer_data["children"] = _expand_as_set(as_set)
 
-                direct_peers.append(peer_data)
+                if is_tier1:
+                    tier1_peers.append(peer_data)
+                else:
+                    tier2_peers.append(peer_data)
 
-        # Sort by name
-        direct_peers.sort(key=lambda x: x["name"])
+        tier1_peers.sort(key=lambda x: x["name"])
+        tier2_peers.sort(key=lambda x: x["name"])
 
-        # Build the tree structure
+        # Build the tree: Tier 1 providers first, then Tier 2
         tree = {
             "name": f"Zenlayer ({', '.join(f'AS{asn}' for asn in zenlayer_asns)})",
             "asn": zenlayer_asns[0],
             "location": location,
-            "children": direct_peers
+            "tier1_count": len(tier1_peers),
+            "tier2_count": len(tier2_peers),
+            "children": tier1_peers + tier2_peers
         }
 
         return tree
