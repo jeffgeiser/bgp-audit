@@ -183,31 +183,51 @@ def _extract_first_hop(as_path: List[int], local_asns: set) -> Optional[int]:
     return None
 
 
-def _analyze_facility_paths(
-    facility_asns: List[int],
+def _analyze_zenlayer_paths(
     local_asns: List[int],
-) -> Dict[int, int]:
+) -> tuple:
     """
-    For every ASN present at a facility, fetch its AS-path data and extract
-    the first hop immediately adjacent to Zenlayer.
+    Analyze AS paths for Zenlayer's own prefixes to discover:
+      1. Direct peers  – the ASN immediately adjacent to a Zenlayer ASN
+      2. Per-peer downstreams – ASNs further up the path that route *through*
+         each direct peer to reach Zenlayer
 
-    Returns {facility_asn: first_hop_asn} for every ASN where a first hop
-    was found.
+    This requires only **one RIPEstat lookup per local ASN** (typically 2
+    calls for AS21859 + AS4229), making it fast enough for a synchronous
+    endpoint.
+
+    Returns (direct_peers: set, peer_downstreams: dict)
+        direct_peers      – {asn, ...}
+        peer_downstreams   – {peer_asn: {downstream_asn, ...}, ...}
     """
     local_set = set(local_asns)
-    first_hops: Dict[int, int] = {}
+    direct_peers: set = set()
+    peer_downstreams: Dict[int, set] = {}
 
-    for asn in facility_asns:
-        if asn in local_set:
-            continue
+    for asn in local_asns:
         paths = _fetch_as_path(asn)
         for path in paths:
-            hop = _extract_first_hop(path, local_set)
-            if hop is not None:
-                first_hops[asn] = hop
-                break  # one confirmed hop is enough per destination ASN
+            # Find the position of a Zenlayer ASN in this path
+            for i, path_asn in enumerate(path):
+                if path_asn in local_set and i > 0:
+                    first_hop = path[i - 1]
+                    if first_hop in local_set:
+                        continue
+                    direct_peers.add(first_hop)
+                    # Everything before the first_hop transits through it
+                    if first_hop not in peer_downstreams:
+                        peer_downstreams[first_hop] = set()
+                    for j in range(0, i - 1):
+                        if path[j] not in local_set:
+                            peer_downstreams[first_hop].add(path[j])
+                    break  # only need the first Zenlayer occurrence per path
 
-    return first_hops
+    print(
+        f"[ASPath] Zenlayer path analysis: "
+        f"{len(direct_peers)} direct peers, "
+        f"{sum(len(v) for v in peer_downstreams.values())} downstream ASNs"
+    )
+    return direct_peers, peer_downstreams
 
 
 # Global app state
@@ -436,14 +456,14 @@ async def discover_summary(
         content = [n for n in all_nets if n["info_type"] in ("Content",)]
         eyeball = [n for n in all_nets if "Eyeball" in n["info_type"]]
 
-        # AS-Path analysis: find direct peers among all facility networks
-        all_asns = [n["asn"] for n in all_nets if n.get("asn")]
-        first_hops = _analyze_facility_paths(all_asns, zenlayer_asns)
-        direct_peer_asns = set(first_hops.values())
+        # AS-Path analysis: find direct peers from Zenlayer's own paths
+        direct_peer_asns, _ = _analyze_zenlayer_paths(zenlayer_asns)
+        facility_asns = {n["asn"] for n in all_nets if n.get("asn")}
+        direct_at_facility = direct_peer_asns & facility_asns
 
         direct_neighbors = [
             {"asn": n["asn"], "name": n["name"]}
-            for n in all_nets if n["asn"] in direct_peer_asns
+            for n in all_nets if n["asn"] in direct_at_facility
         ]
 
         return {
@@ -507,17 +527,19 @@ async def get_routing_flow(
     """
     Build hierarchical routing flow data using AS-Path Frequency Analysis.
 
-    For every network at a facility we fetch real AS-path data via RIPEstat
-    and extract the first hop adjacent to Zenlayer.  Networks are then
-    grouped into a 3-level tree:
+    Instead of querying every facility network individually (which would
+    require hundreds of API calls), we analyse Zenlayer's own prefix paths.
+    From those paths we extract:
 
       Level 0 (Root)  – Zenlayer (AS21859 / AS4229)
-      Level 1         – Direct Peers: ASNs that appear as the first hop
-                        adjacent to a Zenlayer ASN in any observed path
-      Level 2         – Downstream: facility networks whose first hop is
-                        one of the Level-1 Direct Peers
-      Level 1 (also)  – Unresolved: networks where no Zenlayer-adjacent
-                        hop was found (shown as "Transit")
+      Level 1         – Direct Peers: ASNs immediately adjacent to Zenlayer
+      Level 2         – Downstream: facility networks that appear further
+                        up the path (routing *through* a Level-1 peer)
+      Level 1 (also)  – Unresolved: facility networks not seen in any
+                        Zenlayer path (shown as "Transit")
+
+    Total external API calls: 2 per local ASN (prefix list + looking-glass),
+    all cached for 24 hours.
     """
     try:
         config = load_config()
@@ -555,43 +577,44 @@ async def get_routing_flow(
             if asn and asn not in local_set:
                 facility_nets[asn] = net
 
+        facility_asn_set = set(facility_nets.keys())
+
         # ------------------------------------------------------------------
-        # AS-Path Frequency Analysis
-        # For each facility ASN, fetch paths and find the first hop adjacent
-        # to Zenlayer.  Result: {destination_asn: first_hop_asn}
+        # AS-Path Frequency Analysis  (2 API calls per local ASN, cached)
+        # Analyse Zenlayer's own prefix paths to discover direct peers and
+        # the downstream ASNs that route through each peer.
         # ------------------------------------------------------------------
-        first_hops = _analyze_facility_paths(
-            list(facility_nets.keys()), zenlayer_asns
+        direct_peer_asns, peer_downstreams = _analyze_zenlayer_paths(
+            zenlayer_asns
         )
-        print(f"[RoutingFlow] {location}: {len(first_hops)}/{len(facility_nets)} ASNs resolved a first hop")
+
+        # Filter to only peers/downstreams that are present at this facility
+        facility_direct = direct_peer_asns & facility_asn_set
+
+        print(
+            f"[RoutingFlow] {location}: "
+            f"{len(facility_direct)} direct peers at facility "
+            f"(of {len(direct_peer_asns)} global)"
+        )
 
         # ------------------------------------------------------------------
-        # Majority-Hop Grouping
-        # Any ASN that appears as a first_hop for at least one facility
-        # network is promoted to Level 1 (Direct Peer).  Every destination
-        # that routes through it becomes its Level 2 child.
+        # Build Level 1 (Direct Peer) nodes with Level 2 children
         # ------------------------------------------------------------------
-        # Collect {hop_asn: [dest_asn, ...]}
-        hop_to_dests: Dict[int, List[int]] = {}
-        for dest_asn, hop_asn in first_hops.items():
-            hop_to_dests.setdefault(hop_asn, []).append(dest_asn)
-
         direct_peer_nodes: Dict[int, dict] = {}
         assigned_asns = set(local_set)
 
-        for hop_asn, dest_asns in hop_to_dests.items():
-            # Build the Direct Peer node
-            if hop_asn in facility_nets:
-                net = facility_nets[hop_asn]
-                name = net.get("name", f"AS{hop_asn}")
-                info_type = net.get("info_type", "")
-            else:
-                name = f"AS{hop_asn}"
-                info_type = "NSP"
+        for hop_asn in sorted(facility_direct):
+            net = facility_nets[hop_asn]
+
+            # Level 2: downstream ASNs that route through this peer AND
+            # are also present at the facility
+            downstream_at_fac = (
+                peer_downstreams.get(hop_asn, set()) & facility_asn_set
+            )
 
             children = []
-            for d_asn in sorted(dest_asns):
-                if d_asn == hop_asn or d_asn in local_set:
+            for d_asn in sorted(downstream_at_fac):
+                if d_asn in assigned_asns or d_asn == hop_asn:
                     continue
                 d_net = facility_nets.get(d_asn)
                 if d_net:
@@ -608,8 +631,8 @@ async def get_routing_flow(
 
             direct_peer_nodes[hop_asn] = {
                 "asn": hop_asn,
-                "name": name,
-                "info_type": info_type,
+                "name": net.get("name", f"AS{hop_asn}"),
+                "info_type": net.get("info_type", ""),
                 "is_direct": True,
                 "category": "Direct Peer",
                 "children": children,
@@ -618,8 +641,6 @@ async def get_routing_flow(
 
         # ------------------------------------------------------------------
         # Unresolved networks → Level 1 as "Transit"
-        # These are facility networks where no Zenlayer-adjacent hop was
-        # found in the observed AS paths.
         # ------------------------------------------------------------------
         transit_nodes = []
         for asn, net in facility_nets.items():
