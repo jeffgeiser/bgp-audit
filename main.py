@@ -144,6 +144,38 @@ def _get_direct_peers(local_asns: List[int]) -> set:
     return direct_asns
 
 
+def _fetch_downstreams(asn: int) -> set:
+    """
+    Fetch downstream ASNs for a network via BGPView.
+    These are networks that transit through this ASN — i.e. the connections
+    this peer provides. Results are cached to disk for 24 hours.
+    """
+    cache_key = _cache_key("bgp_down", str(asn))
+    cached = _read_cache(cache_key)
+    if cached is not None:
+        return set(cached)
+
+    downstream_asns = set()
+    try:
+        url = f"{BGPVIEW_BASE}/asn/{asn}/downstreams"
+        response = requests.get(url, timeout=15)
+        if response.status_code == 200:
+            data = response.json().get("data", {})
+            for d in data.get("ipv4_downstreams", []):
+                d_asn = d.get("asn")
+                if d_asn:
+                    downstream_asns.add(d_asn)
+            for d in data.get("ipv6_downstreams", []):
+                d_asn = d.get("asn")
+                if d_asn:
+                    downstream_asns.add(d_asn)
+    except Exception as e:
+        print(f"[BGPView] Error fetching downstreams for AS{asn}: {e}")
+
+    _write_cache(cache_key, list(downstream_asns))
+    return downstream_asns
+
+
 # Global app state
 zenlayer_state = {
     "networks": [],
@@ -439,20 +471,22 @@ async def get_routing_flow(
     Build hierarchical routing flow data for visualization.
 
     Structure:
-    - Root: Zenlayer ASNs
-    - Level 1: Direct peers at the location (transit/upstream providers)
-    - Level 2: (Optional) Expanded AS-SET members from each peer
+    - Level 0 (Root): Zenlayer ASNs
+    - Level 1: Direct peers — first-hop neighbors from AS path analysis
+    - Level 2: Networks at this facility that route through each direct peer
+    - Level 1 (also): Remaining NSP/Transit networks not reached via any
+      detected direct peer (shown as "Transit")
     """
     try:
         config = load_config()
         zenlayer_asns = config.get("ASNS", DEFAULT_CONFIG["ASNS"])
+        local_set = set(zenlayer_asns)
 
         # Get facilities for this location
         target_fac_ids = []
         if location_type == "city":
             target_fac_ids = [f["id"] for f in zenlayer_state["facilities"] if f.get("city") == location]
         else:
-            # Metro lookup
             mapping = config.get("METRO_MAP", {})
             cities_in_metro = [city for city, m in mapping.items() if m == location]
             target_fac_ids = [f["id"] for f in zenlayer_state["facilities"] if f.get("city") in cities_in_metro]
@@ -465,7 +499,6 @@ async def get_routing_flow(
         netfacs = fetch_peeringdb(f"netfac?fac_id__in={fac_query}")
         net_ids = list(set([nf["net_id"] for nf in netfacs]))
 
-        # Fetch network details
         all_nets = []
         batch_size = 50
         for i in range(0, len(net_ids), batch_size):
@@ -473,55 +506,97 @@ async def get_routing_flow(
             nets = fetch_peeringdb(f"net?id__in={','.join(map(str, chunk))}")
             all_nets.extend(nets)
 
-        # Dynamically identify direct BGP peers via BGPView
-        direct_peer_asns = _get_direct_peers(zenlayer_asns)
-
-        # Classify peers: Direct Peer (first-hop BGP neighbor) vs Transit
-        direct_peers = []
-        transit_peers = []
-
+        # Index every non-Zenlayer facility network by ASN
+        facility_nets = {}
         for net in all_nets:
             asn = net.get("asn")
-            if asn in zenlayer_asns:
+            if asn and asn not in local_set:
+                facility_nets[asn] = net
+
+        # ------------------------------------------------------------------
+        # Level 1: Identify first-hop neighbors via AS path analysis
+        # ------------------------------------------------------------------
+        direct_peer_asns = _get_direct_peers(zenlayer_asns)
+
+        direct_peer_nodes = {}
+        for asn in direct_peer_asns:
+            if asn in facility_nets:
+                net = facility_nets[asn]
+                direct_peer_nodes[asn] = {
+                    "asn": asn,
+                    "name": net.get("name"),
+                    "info_type": net.get("info_type", ""),
+                    "irr_as_set": net.get("irr_as_set", ""),
+                    "is_direct": True,
+                    "category": "Direct Peer",
+                    "children": []
+                }
+
+        # ------------------------------------------------------------------
+        # Level 2: For each direct peer, find their downstream networks
+        # that are ALSO present at this facility
+        # ------------------------------------------------------------------
+        assigned_asns = set(direct_peer_nodes.keys()) | local_set
+
+        for peer_asn, peer_node in direct_peer_nodes.items():
+            downstream_asns = _fetch_downstreams(peer_asn)
+
+            # Optionally merge in AS-SET expansion members
+            if expand_sets:
+                irr_as_set = peer_node.get("irr_as_set", "")
+                if irr_as_set:
+                    as_set = irr_as_set.split()[0]
+                    if as_set:
+                        for m in _expand_as_set(as_set):
+                            downstream_asns.add(m["asn"])
+
+            # Match downstream ASNs against facility networks
+            for asn, net in facility_nets.items():
+                if asn in assigned_asns:
+                    continue
+                if asn in downstream_asns:
+                    peer_node["children"].append({
+                        "asn": asn,
+                        "name": net.get("name"),
+                        "info_type": net.get("info_type", ""),
+                        "is_direct": False,
+                        "category": "Downstream",
+                    })
+                    assigned_asns.add(asn)
+
+            peer_node["children"].sort(key=lambda x: x["name"])
+
+        # ------------------------------------------------------------------
+        # Remaining unassigned NSP/Transit networks → Level 1 as "Transit"
+        # ------------------------------------------------------------------
+        transit_nodes = []
+        for asn, net in facility_nets.items():
+            if asn in assigned_asns:
                 continue
-
             info_type = net.get("info_type", "")
-            is_nsp = info_type == "NSP"
-            is_transit = "Transit" in info_type
-
-            if is_nsp or is_transit:
-                is_direct = asn in direct_peer_asns
-                peer_data = {
+            if info_type == "NSP" or "Transit" in info_type:
+                transit_nodes.append({
                     "asn": asn,
                     "name": net.get("name"),
                     "info_type": info_type,
                     "irr_as_set": net.get("irr_as_set", ""),
-                    "is_direct": is_direct,
-                    "category": "Direct Peer" if is_direct else "Transit",
+                    "is_direct": False,
+                    "category": "Transit",
                     "children": []
-                }
+                })
 
-                if expand_sets and peer_data["irr_as_set"]:
-                    as_set = peer_data["irr_as_set"].split()[0] if peer_data["irr_as_set"] else ""
-                    if as_set:
-                        peer_data["children"] = _expand_as_set(as_set)
+        direct_list = sorted(direct_peer_nodes.values(), key=lambda x: x["name"])
+        transit_nodes.sort(key=lambda x: x["name"])
+        downstream_total = sum(len(p["children"]) for p in direct_list)
 
-                if is_direct:
-                    direct_peers.append(peer_data)
-                else:
-                    transit_peers.append(peer_data)
-
-        direct_peers.sort(key=lambda x: x["name"])
-        transit_peers.sort(key=lambda x: x["name"])
-
-        # Build the tree: Direct Peers first, then Transit
         tree = {
             "name": f"Zenlayer ({', '.join(f'AS{asn}' for asn in zenlayer_asns)})",
             "asn": zenlayer_asns[0],
             "location": location,
-            "direct_peer_count": len(direct_peers),
-            "transit_count": len(transit_peers),
-            "children": direct_peers + transit_peers
+            "direct_peer_count": len(direct_list),
+            "transit_count": len(transit_nodes),
+            "downstream_count": downstream_total,
+            "children": direct_list + transit_nodes
         }
 
         return tree

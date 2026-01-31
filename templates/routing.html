@@ -169,7 +169,7 @@
                         <span x-show="directPeerCount > 0" class="inline-flex items-center gap-1"><span class="w-2 h-2 rounded-full bg-amber-400 inline-block"></span> <span x-text="directPeerCount"></span> Direct Peers</span>
                         <span x-show="directPeerCount > 0 && transitCount > 0"> &bull; </span>
                         <span x-show="transitCount > 0" class="inline-flex items-center gap-1"><span class="w-2 h-2 rounded-full bg-[#00A9E0] inline-block"></span> <span x-text="transitCount"></span> Transit</span>
-                        <span x-show="expandSets"> &bull; <span x-text="downstreamCount"></span> downstream ASNs</span>
+                        <span x-show="downstreamCount > 0"> &bull; <span class="inline-flex items-center gap-1"><span class="w-2 h-2 rounded-full bg-slate-400 inline-block"></span> <span x-text="downstreamCount"></span> Downstream</span></span>
                     </p>
                 </div>
                 <div class="flex items-center gap-2">
@@ -237,7 +237,7 @@
                         this.peerCount = this.treeData.children?.length || 0;
                         this.directPeerCount = this.treeData.direct_peer_count || 0;
                         this.transitCount = this.treeData.transit_count || 0;
-                        this.downstreamCount = this.treeData.children?.reduce((acc, peer) => acc + (peer.children?.length || 0), 0) || 0;
+                        this.downstreamCount = this.treeData.downstream_count || 0;
 
                     } catch (err) {
                         console.error('Error loading routing flow:', err);
