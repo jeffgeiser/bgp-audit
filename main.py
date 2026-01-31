@@ -6,7 +6,7 @@ import hashlib
 import requests
 import functools
 from fastapi import FastAPI, Request, HTTPException
-from fastapi.responses import HTMLResponse, JSONResponse
+from fastapi.responses import HTMLResponse, JSONResponse, StreamingResponse
 from fastapi.templating import Jinja2Templates
 from typing import List, Dict, Any, Optional
 
@@ -673,4 +673,212 @@ async def get_routing_flow(
 
     except Exception as e:
         print(f"[API] Routing flow error: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+# ---------------------------------------------------------------------------
+# PDF Export
+# ---------------------------------------------------------------------------
+
+def _build_routing_pdf(tree: dict, location: str) -> bytes:
+    """Render a customer-ready PDF for a routing-flow tree."""
+    import io
+    from reportlab.lib.pagesizes import letter
+    from reportlab.lib.units import inch
+    from reportlab.lib import colors
+    from reportlab.platypus import (
+        SimpleDocTemplate, Table, TableStyle, Paragraph, Spacer
+    )
+    from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
+    from reportlab.lib.enums import TA_CENTER, TA_LEFT
+    from datetime import datetime, timezone
+
+    buf = io.BytesIO()
+    doc = SimpleDocTemplate(
+        buf, pagesize=letter,
+        topMargin=0.6 * inch, bottomMargin=0.5 * inch,
+        leftMargin=0.6 * inch, rightMargin=0.6 * inch,
+    )
+    styles = getSampleStyleSheet()
+    elements = []
+
+    # Colours
+    zl_navy = colors.HexColor("#00205B")
+    zl_blue = colors.HexColor("#00A9E0")
+    peer_blue = colors.HexColor("#2563eb")
+    light_blue = colors.HexColor("#eff6ff")
+    light_green = colors.HexColor("#dcfce7")
+    ds_blue = colors.HexColor("#dbeafe")
+
+    # Custom styles
+    title_style = ParagraphStyle(
+        "ZLTitle", parent=styles["Title"],
+        textColor=zl_navy, fontSize=18, spaceAfter=2,
+    )
+    subtitle_style = ParagraphStyle(
+        "ZLSub", parent=styles["Normal"],
+        textColor=colors.HexColor("#64748b"), fontSize=10, spaceAfter=12,
+    )
+    section_style = ParagraphStyle(
+        "ZLSection", parent=styles["Heading2"],
+        textColor=zl_navy, fontSize=13, spaceBefore=16, spaceAfter=6,
+    )
+    cell_style = ParagraphStyle(
+        "Cell", parent=styles["Normal"], fontSize=9, leading=12,
+    )
+    cell_bold = ParagraphStyle(
+        "CellBold", parent=cell_style, fontName="Helvetica-Bold",
+    )
+    cell_mono = ParagraphStyle(
+        "CellMono", parent=cell_style, fontName="Courier", fontSize=9,
+    )
+
+    # Header
+    now = datetime.now(timezone.utc).strftime("%d %b %Y %H:%M UTC")
+    elements.append(Paragraph(f"Zenlayer BGP Routing Flow", title_style))
+    elements.append(Paragraph(f"{location}  &mdash;  Generated {now}", subtitle_style))
+
+    # Summary
+    children = tree.get("children", [])
+    direct_peers = [c for c in children if c.get("is_direct")]
+    transit = [c for c in children if not c.get("is_direct")]
+    downstream_total = sum(len(p.get("children", [])) for p in direct_peers)
+
+    summary_data = [
+        ["Direct Peers", str(len(direct_peers))],
+        ["Downstream Networks", str(downstream_total)],
+        ["Transit / Unresolved", str(len(transit))],
+        ["Total Facility Networks", str(len(children) + downstream_total)],
+    ]
+    summary_table = Table(summary_data, colWidths=[2.5 * inch, 1.2 * inch])
+    summary_table.setStyle(TableStyle([
+        ("FONTNAME", (0, 0), (-1, -1), "Helvetica"),
+        ("FONTSIZE", (0, 0), (-1, -1), 10),
+        ("FONTNAME", (1, 0), (1, -1), "Helvetica-Bold"),
+        ("ALIGN", (1, 0), (1, -1), "RIGHT"),
+        ("BOTTOMPADDING", (0, 0), (-1, -1), 4),
+        ("TOPPADDING", (0, 0), (-1, -1), 4),
+        ("LINEBELOW", (0, -1), (-1, -1), 0.5, colors.HexColor("#cbd5e1")),
+    ]))
+    elements.append(summary_table)
+
+    # Direct Peers section
+    if direct_peers:
+        elements.append(Paragraph("Direct Peers", section_style))
+
+        for peer in sorted(direct_peers, key=lambda p: p.get("name", "")):
+            peer_children = peer.get("children", [])
+            rows = [[
+                Paragraph(f"<b>AS{peer['asn']}</b>", cell_mono),
+                Paragraph(f"<b>{peer.get('name', '')}</b>", cell_bold),
+                Paragraph(peer.get("info_type", ""), cell_style),
+                Paragraph(f"{len(peer_children)} downstream", cell_style),
+            ]]
+            t = Table(rows, colWidths=[0.9 * inch, 2.8 * inch, 1.3 * inch, 1.2 * inch])
+            t.setStyle(TableStyle([
+                ("BACKGROUND", (0, 0), (-1, 0), light_green),
+                ("BOX", (0, 0), (-1, -1), 0.5, peer_blue),
+                ("TOPPADDING", (0, 0), (-1, -1), 5),
+                ("BOTTOMPADDING", (0, 0), (-1, -1), 5),
+                ("LEFTPADDING", (0, 0), (-1, -1), 6),
+            ]))
+            elements.append(Spacer(1, 4))
+            elements.append(t)
+
+            # Downstream table under this peer
+            if peer_children:
+                ds_rows = []
+                for ds in sorted(peer_children, key=lambda d: d.get("name", "")):
+                    ds_rows.append([
+                        Paragraph(f"AS{ds['asn']}", cell_mono),
+                        Paragraph(ds.get("name", ""), cell_style),
+                        Paragraph(ds.get("info_type", ""), cell_style),
+                    ])
+                ds_table = Table(
+                    ds_rows,
+                    colWidths=[0.9 * inch, 3.0 * inch, 1.3 * inch],
+                )
+                ds_table.setStyle(TableStyle([
+                    ("BACKGROUND", (0, 0), (-1, -1), ds_blue),
+                    ("BOX", (0, 0), (-1, -1), 0.25, colors.HexColor("#93c5fd")),
+                    ("LINEBELOW", (0, 0), (-1, -2), 0.25, colors.HexColor("#bfdbfe")),
+                    ("TOPPADDING", (0, 0), (-1, -1), 3),
+                    ("BOTTOMPADDING", (0, 0), (-1, -1), 3),
+                    ("LEFTPADDING", (0, 0), (0, -1), 20),
+                    ("LEFTPADDING", (1, 0), (-1, -1), 6),
+                ]))
+                elements.append(ds_table)
+
+    # Transit section
+    if transit:
+        elements.append(Paragraph("Transit / Unresolved", section_style))
+        t_rows = [
+            [
+                Paragraph("<b>ASN</b>", cell_bold),
+                Paragraph("<b>Name</b>", cell_bold),
+                Paragraph("<b>Type</b>", cell_bold),
+            ]
+        ]
+        for node in sorted(transit, key=lambda n: n.get("name", "")):
+            t_rows.append([
+                Paragraph(f"AS{node['asn']}", cell_mono),
+                Paragraph(node.get("name", ""), cell_style),
+                Paragraph(node.get("info_type", ""), cell_style),
+            ])
+        t_table = Table(t_rows, colWidths=[0.9 * inch, 3.5 * inch, 1.3 * inch])
+        t_table.setStyle(TableStyle([
+            ("BACKGROUND", (0, 0), (-1, 0), zl_navy),
+            ("TEXTCOLOR", (0, 0), (-1, 0), colors.white),
+            ("FONTNAME", (0, 0), (-1, 0), "Helvetica-Bold"),
+            ("FONTSIZE", (0, 0), (-1, 0), 9),
+            ("BACKGROUND", (0, 1), (-1, -1), light_blue),
+            ("BOX", (0, 0), (-1, -1), 0.5, colors.HexColor("#94a3b8")),
+            ("LINEBELOW", (0, 0), (-1, -2), 0.25, colors.HexColor("#cbd5e1")),
+            ("TOPPADDING", (0, 0), (-1, -1), 4),
+            ("BOTTOMPADDING", (0, 0), (-1, -1), 4),
+            ("LEFTPADDING", (0, 0), (-1, -1), 6),
+        ]))
+        elements.append(Spacer(1, 4))
+        elements.append(t_table)
+
+    # Footer note
+    elements.append(Spacer(1, 20))
+    elements.append(Paragraph(
+        "Data sourced from PeeringDB and RIPEstat. "
+        "Direct peer classification is based on AS-path frequency analysis "
+        "of Zenlayer prefix announcements.",
+        ParagraphStyle("Footer", parent=styles["Normal"],
+                        fontSize=8, textColor=colors.HexColor("#94a3b8")),
+    ))
+
+    doc.build(elements)
+    buf.seek(0)
+    return buf.getvalue()
+
+
+@app.get("/api/routing-flow/pdf")
+async def routing_flow_pdf(location: str, location_type: str = "city"):
+    """Generate and return a PDF export of the routing flow for a location."""
+    try:
+        tree_response = await get_routing_flow(
+            location=location, location_type=location_type
+        )
+        if isinstance(tree_response, dict) and "error" in tree_response:
+            raise HTTPException(status_code=404, detail=tree_response["error"])
+
+        pdf_bytes = _build_routing_pdf(tree_response, location)
+        safe_name = location.replace(" ", "_").replace("/", "-")
+
+        import io
+        return StreamingResponse(
+            io.BytesIO(pdf_bytes),
+            media_type="application/pdf",
+            headers={
+                "Content-Disposition": f'attachment; filename="Zenlayer_Routing_{safe_name}.pdf"'
+            },
+        )
+    except HTTPException:
+        raise
+    except Exception as e:
+        print(f"[API] PDF export error: {e}")
         raise HTTPException(status_code=500, detail=str(e))
