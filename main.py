@@ -79,48 +79,69 @@ def clear_file_cache():
                 pass
     print("[Cache] File cache cleared")
 
-def _fetch_bgp_peers(asn: int) -> set:
+def _extract_first_hop(as_path: List[int], local_asns: set) -> Optional[int]:
     """
-    Fetch direct BGP peers for an ASN via BGPView.
-    Returns a set of peer ASNs (first-hop neighbors).
+    Walk an AS path and return the first ASN that is not one of our local ASNs.
+    Example: [21859, 2914, 12345] → 2914  (Direct Connection)
+             [21859, 4229]        → None  (only local ASNs)
+             []                   → None
+    """
+    for asn in as_path:
+        if asn not in local_asns:
+            return asn
+    return None
+
+
+def _fetch_as_paths(asn: int) -> List[List[int]]:
+    """
+    Fetch observed upstream AS paths for an ASN from BGPView.
+    Each upstream represents a path segment: [local_asn, upstream_asn].
     Results are cached to disk for 24 hours.
     """
-    cache_key = _cache_key("bgp_peers", str(asn))
+    cache_key = _cache_key("bgp_paths", str(asn))
     cached = _read_cache(cache_key)
     if cached is not None:
-        return set(cached)
+        return cached
 
-    peer_asns = set()
+    paths = []
+    seen = set()
     try:
-        url = f"{BGPVIEW_BASE}/asn/{asn}/peers"
+        url = f"{BGPVIEW_BASE}/asn/{asn}/upstreams"
         response = requests.get(url, timeout=15)
         if response.status_code == 200:
             data = response.json().get("data", {})
-            for p in data.get("ipv4_peers", []):
-                peer_asn = p.get("asn")
-                if peer_asn:
-                    peer_asns.add(peer_asn)
-            for p in data.get("ipv6_peers", []):
-                peer_asn = p.get("asn")
-                if peer_asn:
-                    peer_asns.add(peer_asn)
+            for u in data.get("ipv4_upstreams", []):
+                upstream_asn = u.get("asn")
+                if upstream_asn and upstream_asn not in seen:
+                    seen.add(upstream_asn)
+                    paths.append([asn, upstream_asn])
+            for u in data.get("ipv6_upstreams", []):
+                upstream_asn = u.get("asn")
+                if upstream_asn and upstream_asn not in seen:
+                    seen.add(upstream_asn)
+                    paths.append([asn, upstream_asn])
     except Exception as e:
-        print(f"[BGPView] Error fetching peers for AS{asn}: {e}")
+        print(f"[BGPView] Error fetching paths for AS{asn}: {e}")
 
-    _write_cache(cache_key, list(peer_asns))
-    return peer_asns
+    _write_cache(cache_key, paths)
+    return paths
 
 
 def _get_direct_peers(local_asns: List[int]) -> set:
     """
-    Build the combined set of direct BGP peers across all local ASNs.
-    Excludes the local ASNs themselves from the result.
+    Analyze AS paths for all local ASNs to build the set of direct peers.
+    A direct peer is any ASN that appears as the first hop (the very next
+    ASN after our local ASN) in observed BGP AS paths.
     """
-    all_peers = set()
     local_set = set(local_asns)
+    direct_asns = set()
     for asn in local_asns:
-        all_peers.update(_fetch_bgp_peers(asn))
-    return all_peers - local_set
+        as_paths = _fetch_as_paths(asn)
+        for path in as_paths:
+            first_hop = _extract_first_hop(path, local_set)
+            if first_hop is not None:
+                direct_asns.add(first_hop)
+    return direct_asns
 
 
 # Global app state
