@@ -159,8 +159,8 @@
                         <svg class="w-4 h-4 text-amber-700" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 3v4M3 5h4M6 17v4m-2-2h4m5-16l2.286 6.857L21 12l-5.714 2.143L13 21l-2.286-6.857L5 12l5.714-2.143L13 3z" /></svg>
                     </div>
                     <div>
-                        <p class="text-[10px] font-black text-slate-400 uppercase tracking-wider">Tier 1 Neighbors</p>
-                        <p class="text-lg font-black text-amber-700 leading-tight" x-text="summary?.tier1_count || 0"></p>
+                        <p class="text-[10px] font-black text-slate-400 uppercase tracking-wider">Direct Peers</p>
+                        <p class="text-lg font-black text-amber-700 leading-tight" x-text="summary?.direct_peer_count || 0"></p>
                     </div>
                 </div>
 
@@ -188,15 +188,15 @@
                     </div>
                 </div>
 
-                <!-- Tier 1 neighbor badges -->
-                <template x-if="summary?.tier1_neighbors?.length > 0">
+                <!-- Direct peer badges -->
+                <template x-if="summary?.direct_peers?.length > 0">
                     <div class="ml-auto flex items-center gap-2 flex-wrap">
-                        <span class="text-[10px] font-black text-slate-400 uppercase tracking-wider mr-1">Direct Tier 1:</span>
-                        <template x-for="t1 in summary.tier1_neighbors" :key="t1.asn">
+                        <span class="text-[10px] font-black text-slate-400 uppercase tracking-wider mr-1">Direct Peers:</span>
+                        <template x-for="dp in summary.direct_peers" :key="dp.asn">
                             <span class="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-full bg-amber-50 border border-amber-200 text-xs font-bold text-amber-800">
                                 <span class="w-1.5 h-1.5 rounded-full bg-amber-400"></span>
-                                <span x-text="t1.label"></span>
-                                <span class="text-amber-500 font-mono text-[10px]" x-text="'AS' + t1.asn"></span>
+                                <span x-text="dp.name" class="max-w-[120px] truncate"></span>
+                                <span class="text-amber-500 font-mono text-[10px]" x-text="'AS' + dp.asn"></span>
                             </span>
                         </template>
                     </div>
