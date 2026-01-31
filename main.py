@@ -79,68 +79,76 @@ def clear_file_cache():
                 pass
     print("[Cache] File cache cleared")
 
-def _extract_first_hop(as_path: List[int], local_asns: set) -> Optional[int]:
+def _fetch_bgp_neighbors(asn: int) -> set:
     """
-    Walk an AS path and return the first ASN that is not one of our local ASNs.
-    Example: [21859, 2914, 12345] → 2914  (Direct Connection)
-             [21859, 4229]        → None  (only local ASNs)
-             []                   → None
-    """
-    for asn in as_path:
-        if asn not in local_asns:
-            return asn
-    return None
+    Fetch all BGP neighbor ASNs for an ASN.
+    Uses BGPView /peers (all BGP neighbors) as the primary source, with
+    RIPEstat asn-neighbours as a fallback.  Results are cached for 24 hours.
 
-
-def _fetch_as_paths(asn: int) -> List[List[int]]:
+    The /peers endpoint is used instead of /upstreams because large transit
+    providers like Zenlayer may report zero upstreams in BGPView while still
+    having hundreds of active BGP peers.
     """
-    Fetch observed upstream AS paths for an ASN from BGPView.
-    Each upstream represents a path segment: [local_asn, upstream_asn].
-    Results are cached to disk for 24 hours.
-    """
-    cache_key = _cache_key("bgp_paths", str(asn))
+    cache_key = _cache_key("bgp_neighbors", str(asn))
     cached = _read_cache(cache_key)
     if cached is not None:
-        return cached
+        return set(cached)
 
-    paths = []
-    seen = set()
+    neighbor_asns = set()
+    headers = {"User-Agent": "bgp-audit/1.0"}
+
+    # --- Primary: BGPView /peers ---
     try:
-        url = f"{BGPVIEW_BASE}/asn/{asn}/upstreams"
-        response = requests.get(url, timeout=15)
-        if response.status_code == 200:
-            data = response.json().get("data", {})
-            for u in data.get("ipv4_upstreams", []):
-                upstream_asn = u.get("asn")
-                if upstream_asn and upstream_asn not in seen:
-                    seen.add(upstream_asn)
-                    paths.append([asn, upstream_asn])
-            for u in data.get("ipv6_upstreams", []):
-                upstream_asn = u.get("asn")
-                if upstream_asn and upstream_asn not in seen:
-                    seen.add(upstream_asn)
-                    paths.append([asn, upstream_asn])
+        url = f"{BGPVIEW_BASE}/asn/{asn}/peers"
+        resp = requests.get(url, timeout=15, headers=headers)
+        if resp.status_code == 200 and resp.text.strip():
+            data = resp.json().get("data", {})
+            for p in data.get("ipv4_peers", []):
+                p_asn = p.get("asn")
+                if p_asn:
+                    neighbor_asns.add(p_asn)
+            for p in data.get("ipv6_peers", []):
+                p_asn = p.get("asn")
+                if p_asn:
+                    neighbor_asns.add(p_asn)
+            print(f"[BGPView] AS{asn} /peers returned {len(neighbor_asns)} neighbors")
     except Exception as e:
-        print(f"[BGPView] Error fetching paths for AS{asn}: {e}")
+        print(f"[BGPView] Error fetching peers for AS{asn}: {e}")
 
-    _write_cache(cache_key, paths)
-    return paths
+    # --- Fallback: RIPEstat asn-neighbours ---
+    if not neighbor_asns:
+        try:
+            url = f"https://stat.ripe.net/data/asn-neighbours/data.json?resource=AS{asn}"
+            resp = requests.get(url, timeout=15, headers=headers)
+            if resp.status_code == 200 and resp.text.strip():
+                data = resp.json().get("data", {})
+                for n in data.get("neighbours", []):
+                    n_asn = n.get("asn")
+                    if n_asn:
+                        neighbor_asns.add(n_asn)
+                print(f"[RIPEstat] AS{asn} returned {len(neighbor_asns)} neighbors (fallback)")
+        except Exception as e:
+            print(f"[RIPEstat] Error fetching neighbors for AS{asn}: {e}")
+
+    if not neighbor_asns:
+        print(f"[BGP] WARNING: No neighbors found for AS{asn} from any source")
+
+    _write_cache(cache_key, list(neighbor_asns))
+    return neighbor_asns
 
 
 def _get_direct_peers(local_asns: List[int]) -> set:
     """
-    Analyze AS paths for all local ASNs to build the set of direct peers.
-    A direct peer is any ASN that appears as the first hop (the very next
-    ASN after our local ASN) in observed BGP AS paths.
+    Build the set of ASNs that have a direct BGP session with any of our
+    local ASNs.  The caller is expected to filter the result against the
+    facility network list so that only co-located peers remain.
     """
     local_set = set(local_asns)
     direct_asns = set()
     for asn in local_asns:
-        as_paths = _fetch_as_paths(asn)
-        for path in as_paths:
-            first_hop = _extract_first_hop(path, local_set)
-            if first_hop is not None:
-                direct_asns.add(first_hop)
+        neighbors = _fetch_bgp_neighbors(asn)
+        direct_asns.update(neighbors - local_set)
+    print(f"[BGP] Total direct peer ASNs across {len(local_asns)} local ASNs: {len(direct_asns)}")
     return direct_asns
 
 
@@ -158,7 +166,7 @@ def _fetch_downstreams(asn: int) -> set:
     downstream_asns = set()
     try:
         url = f"{BGPVIEW_BASE}/asn/{asn}/downstreams"
-        response = requests.get(url, timeout=15)
+        response = requests.get(url, timeout=15, headers={"User-Agent": "bgp-audit/1.0"})
         if response.status_code == 200:
             data = response.json().get("data", {})
             for d in data.get("ipv4_downstreams", []):
