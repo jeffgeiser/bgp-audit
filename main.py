@@ -628,7 +628,10 @@ async def get_routing_flow(
             assigned_asns.add(hop_asn)
 
         # External 1-Hop peers (direct peer globally but NOT at this
-        # facility).  Check IX co-location before labelling.
+        # facility).  Only promote to Level 1 if they share an IX with
+        # Zenlayer at this location (Exchange/IXP Path).  All others
+        # are skipped — their downstream networks will be caught by the
+        # transit distribution below.
         external_direct = direct_peer_asns - facility_asn_set - local_set
         for hop_asn in sorted(external_direct):
             # Lightweight IX membership check (cached)
@@ -646,6 +649,10 @@ async def get_routing_flow(
                     verified = True
                     verification = "Shared IX"
                     shared_ix = [ix_names.get(ix, f"IX-{ix}") for ix in common]
+
+            # Only add IX-verified external peers as Level 1 nodes
+            if not verified:
+                continue
 
             # Still include their downstream networks at the facility
             downstream_at_fac = (
