@@ -525,21 +525,16 @@ async def get_routing_flow(
     expand_sets: bool = False
 ):
     """
-    Build hierarchical routing flow data using AS-Path Frequency Analysis.
+    Build hierarchical routing flow data using AS-Path Frequency Analysis
+    with PeeringDB verification.
 
-    Instead of querying every facility network individually (which would
-    require hundreds of API calls), we analyse Zenlayer's own prefix paths.
-    From those paths we extract:
-
-      Level 0 (Root)  – Zenlayer (AS21859 / AS4229)
-      Level 1         – Direct Peers: ASNs immediately adjacent to Zenlayer
-      Level 2         – Downstream: facility networks that appear further
-                        up the path (routing *through* a Level-1 peer)
-      Level 1 (also)  – Unresolved: facility networks not seen in any
-                        Zenlayer path (shown as "Transit")
-
-    Total external API calls: 2 per local ASN (prefix list + looking-glass),
-    all cached for 24 hours.
+    Tree structure:
+      Level 0 (Root) – Zenlayer Origins
+      Level 1        – Direct Peers (Verified Local | External 1-Hop)
+        Level 2      – Downstream: networks that route through this peer
+        Level 2      – Reachable Transit: unresolved networks assigned to
+                       this peer via extended path analysis
+      Level 1        – Unresolved: networks not assignable to any peer
     """
     try:
         config = load_config()
@@ -580,15 +575,38 @@ async def get_routing_flow(
         facility_asn_set = set(facility_nets.keys())
 
         # ------------------------------------------------------------------
+        # PeeringDB Verification: find IXes at these facilities so we can
+        # verify co-location for peers that share an IX with Zenlayer even
+        # if they are registered at a different facility.
+        # ------------------------------------------------------------------
+        zenlayer_net_ids = [n["id"] for n in zenlayer_state.get("networks", [])]
+        ix_at_facs = fetch_peeringdb(f"ixfac?fac_id__in={fac_query}")
+        local_ix_ids = set(ix.get("ix_id") for ix in ix_at_facs if ix.get("ix_id"))
+
+        zl_ix_ids: set = set()
+        for nid in zenlayer_net_ids:
+            for rec in fetch_peeringdb(f"netixlan?net_id={nid}"):
+                ix_id = rec.get("ix_id")
+                if ix_id:
+                    zl_ix_ids.add(ix_id)
+        zenlayer_local_ixes = local_ix_ids & zl_ix_ids
+
+        # Build a lookup: {ix_id: ix_name}
+        ix_names: Dict[int, str] = {}
+        if zenlayer_local_ixes:
+            ix_data = fetch_peeringdb(
+                f"ix?id__in={','.join(map(str, zenlayer_local_ixes))}"
+            )
+            for ix in ix_data:
+                ix_names[ix["id"]] = ix.get("name", f"IX-{ix['id']}")
+
+        # ------------------------------------------------------------------
         # AS-Path Frequency Analysis  (2 API calls per local ASN, cached)
-        # Analyse Zenlayer's own prefix paths to discover direct peers and
-        # the downstream ASNs that route through each peer.
         # ------------------------------------------------------------------
         direct_peer_asns, peer_downstreams = _analyze_zenlayer_paths(
             zenlayer_asns
         )
 
-        # Filter to only peers/downstreams that are present at this facility
         facility_direct = direct_peer_asns & facility_asn_set
 
         print(
@@ -598,7 +616,7 @@ async def get_routing_flow(
         )
 
         # ------------------------------------------------------------------
-        # Build Level 1 (Direct Peer) nodes with Level 2 children
+        # Build Level 1 nodes  (Direct Peers)
         # ------------------------------------------------------------------
         direct_peer_nodes: Dict[int, dict] = {}
         assigned_asns = set(local_set)
@@ -606,8 +624,7 @@ async def get_routing_flow(
         for hop_asn in sorted(facility_direct):
             net = facility_nets[hop_asn]
 
-            # Level 2: downstream ASNs that route through this peer AND
-            # are also present at the facility
+            # Level 2: downstream ASNs via path analysis
             downstream_at_fac = (
                 peer_downstreams.get(hop_asn, set()) & facility_asn_set
             )
@@ -629,44 +646,137 @@ async def get_routing_flow(
 
             children.sort(key=lambda x: x["name"])
 
+            # PeeringDB Verified – at the same facility
             direct_peer_nodes[hop_asn] = {
                 "asn": hop_asn,
                 "name": net.get("name", f"AS{hop_asn}"),
                 "info_type": net.get("info_type", ""),
                 "is_direct": True,
+                "verified": True,
+                "verification": "PeeringDB Facility",
                 "category": "Direct Peer",
                 "children": children,
+                "transit_children": [],
+            }
+            assigned_asns.add(hop_asn)
+
+        # External 1-Hop peers (direct peer globally but NOT at this
+        # facility).  Check IX co-location before labelling.
+        external_direct = direct_peer_asns - facility_asn_set - local_set
+        for hop_asn in sorted(external_direct):
+            # Lightweight IX membership check (cached)
+            verified = False
+            verification = "External 1-Hop"
+            shared_ix: List[str] = []
+
+            peer_nets = fetch_peeringdb(f"net?asn={hop_asn}")
+            if peer_nets and zenlayer_local_ixes:
+                pnet_id = peer_nets[0]["id"]
+                peer_ixlans = fetch_peeringdb(f"netixlan?net_id={pnet_id}")
+                peer_ix_set = set(r.get("ix_id") for r in peer_ixlans)
+                common = peer_ix_set & zenlayer_local_ixes
+                if common:
+                    verified = True
+                    verification = "Shared IX"
+                    shared_ix = [ix_names.get(ix, f"IX-{ix}") for ix in common]
+
+            # Still include their downstream networks at the facility
+            downstream_at_fac = (
+                peer_downstreams.get(hop_asn, set()) & facility_asn_set
+            )
+            children = []
+            for d_asn in sorted(downstream_at_fac):
+                if d_asn in assigned_asns or d_asn == hop_asn:
+                    continue
+                d_net = facility_nets.get(d_asn)
+                if d_net:
+                    children.append({
+                        "asn": d_asn,
+                        "name": d_net.get("name", f"AS{d_asn}"),
+                        "info_type": d_net.get("info_type", ""),
+                        "is_direct": False,
+                        "category": "Downstream",
+                    })
+                    assigned_asns.add(d_asn)
+            children.sort(key=lambda x: x["name"])
+
+            name = peer_nets[0].get("name", f"AS{hop_asn}") if peer_nets else f"AS{hop_asn}"
+            info_type = peer_nets[0].get("info_type", "") if peer_nets else "NSP"
+
+            direct_peer_nodes[hop_asn] = {
+                "asn": hop_asn,
+                "name": name,
+                "info_type": info_type,
+                "is_direct": True,
+                "verified": verified,
+                "verification": verification,
+                "shared_ix": shared_ix,
+                "category": "Direct Peer",
+                "children": children,
+                "transit_children": [],
             }
             assigned_asns.add(hop_asn)
 
         # ------------------------------------------------------------------
-        # Unresolved networks → Level 1 as "Transit"
+        # Nest unresolved transit networks under their nearest direct peer
+        # by checking if the transit ASN appears in any peer's downstream
+        # set from the global path data.
         # ------------------------------------------------------------------
-        transit_nodes = []
-        for asn, net in facility_nets.items():
-            if asn in assigned_asns:
-                continue
-            transit_nodes.append({
+        unresolved_asns = set()
+        for asn in facility_nets:
+            if asn not in assigned_asns:
+                unresolved_asns.add(asn)
+
+        for t_asn in list(unresolved_asns):
+            for peer_asn, ds_set in peer_downstreams.items():
+                if t_asn in ds_set and peer_asn in direct_peer_nodes:
+                    t_net = facility_nets[t_asn]
+                    direct_peer_nodes[peer_asn]["transit_children"].append({
+                        "asn": t_asn,
+                        "name": t_net.get("name", f"AS{t_asn}"),
+                        "info_type": t_net.get("info_type", ""),
+                        "is_direct": False,
+                        "category": "Transit Reachable",
+                    })
+                    assigned_asns.add(t_asn)
+                    unresolved_asns.discard(t_asn)
+                    break
+
+        # Sort transit children
+        for node in direct_peer_nodes.values():
+            node["transit_children"].sort(key=lambda x: x["name"])
+
+        # ------------------------------------------------------------------
+        # Truly unresolved → single collapsible "Unresolved" group
+        # ------------------------------------------------------------------
+        unresolved_children = []
+        for asn in sorted(unresolved_asns):
+            net = facility_nets[asn]
+            unresolved_children.append({
                 "asn": asn,
                 "name": net.get("name", f"AS{asn}"),
                 "info_type": net.get("info_type", ""),
                 "is_direct": False,
-                "category": "Transit",
-                "children": []
+                "category": "Unresolved",
             })
 
+        # ------------------------------------------------------------------
+        # Assemble tree
+        # ------------------------------------------------------------------
         direct_list = sorted(direct_peer_nodes.values(), key=lambda x: x["name"])
-        transit_nodes.sort(key=lambda x: x["name"])
         downstream_total = sum(len(p["children"]) for p in direct_list)
+        transit_nested = sum(len(p["transit_children"]) for p in direct_list)
 
         tree = {
             "name": f"Zenlayer ({', '.join(f'AS{asn}' for asn in zenlayer_asns)})",
             "asn": zenlayer_asns[0],
             "location": location,
             "direct_peer_count": len(direct_list),
-            "transit_count": len(transit_nodes),
             "downstream_count": downstream_total,
-            "children": direct_list + transit_nodes
+            "transit_nested_count": transit_nested,
+            "unresolved_count": len(unresolved_children),
+            "children": direct_list,
+            "unresolved": unresolved_children,
         }
 
         return tree
@@ -706,9 +816,11 @@ def _build_routing_pdf(tree: dict, location: str) -> bytes:
     zl_navy = colors.HexColor("#00205B")
     zl_blue = colors.HexColor("#00A9E0")
     peer_blue = colors.HexColor("#2563eb")
+    verified_green = colors.HexColor("#16a34a")
     light_blue = colors.HexColor("#eff6ff")
     light_green = colors.HexColor("#dcfce7")
     ds_blue = colors.HexColor("#dbeafe")
+    transit_bg = colors.HexColor("#f1f5f9")
 
     # Custom styles
     title_style = ParagraphStyle(
@@ -732,23 +844,31 @@ def _build_routing_pdf(tree: dict, location: str) -> bytes:
     cell_mono = ParagraphStyle(
         "CellMono", parent=cell_style, fontName="Courier", fontSize=9,
     )
+    cell_small = ParagraphStyle(
+        "CellSmall", parent=cell_style, fontSize=8,
+        textColor=colors.HexColor("#64748b"),
+    )
 
     # Header
     now = datetime.now(timezone.utc).strftime("%d %b %Y %H:%M UTC")
-    elements.append(Paragraph(f"Zenlayer BGP Routing Flow", title_style))
+    elements.append(Paragraph("Zenlayer BGP Routing Flow", title_style))
     elements.append(Paragraph(f"{location}  &mdash;  Generated {now}", subtitle_style))
 
-    # Summary
-    children = tree.get("children", [])
-    direct_peers = [c for c in children if c.get("is_direct")]
-    transit = [c for c in children if not c.get("is_direct")]
-    downstream_total = sum(len(p.get("children", [])) for p in direct_peers)
+    # Summary — use new tree fields
+    direct_peers = tree.get("children", [])
+    unresolved = tree.get("unresolved", [])
+    downstream_total = tree.get("downstream_count", 0)
+    transit_nested = tree.get("transit_nested_count", 0)
 
     summary_data = [
-        ["Direct Peers", str(len(direct_peers))],
+        ["Direct Peers", str(tree.get("direct_peer_count", len(direct_peers)))],
         ["Downstream Networks", str(downstream_total)],
-        ["Transit / Unresolved", str(len(transit))],
-        ["Total Facility Networks", str(len(children) + downstream_total)],
+        ["Transit Reachable", str(transit_nested)],
+        ["Unresolved", str(tree.get("unresolved_count", len(unresolved)))],
+        [
+            "Total Facility Networks",
+            str(len(direct_peers) + downstream_total + transit_nested + len(unresolved)),
+        ],
     ]
     summary_table = Table(summary_data, colWidths=[2.5 * inch, 1.2 * inch])
     summary_table.setStyle(TableStyle([
@@ -768,16 +888,42 @@ def _build_routing_pdf(tree: dict, location: str) -> bytes:
 
         for peer in sorted(direct_peers, key=lambda p: p.get("name", "")):
             peer_children = peer.get("children", [])
+            peer_transit = peer.get("transit_children", [])
+
+            # Verification label
+            verified = peer.get("verified", False)
+            verification = peer.get("verification", "")
+            if verified:
+                status_text = f'<font color="#16a34a"><b>{verification}</b></font>'
+            else:
+                status_text = f'<font color="#94a3b8">{verification}</font>'
+
+            # Shared IX detail
+            shared_ix = peer.get("shared_ix", [])
+            ix_detail = ""
+            if shared_ix:
+                ix_detail = f" ({', '.join(shared_ix)})"
+
+            # Summary line: "3 Downstream, 12 Transit Reachable"
+            counts = []
+            if peer_children:
+                counts.append(f"{len(peer_children)} downstream")
+            if peer_transit:
+                counts.append(f"{len(peer_transit)} transit reachable")
+            count_text = ", ".join(counts) if counts else "no downstream"
+
             rows = [[
                 Paragraph(f"<b>AS{peer['asn']}</b>", cell_mono),
                 Paragraph(f"<b>{peer.get('name', '')}</b>", cell_bold),
-                Paragraph(peer.get("info_type", ""), cell_style),
-                Paragraph(f"{len(peer_children)} downstream", cell_style),
+                Paragraph(status_text + ix_detail, cell_style),
+                Paragraph(count_text, cell_small),
             ]]
-            t = Table(rows, colWidths=[0.9 * inch, 2.8 * inch, 1.3 * inch, 1.2 * inch])
+            peer_bg = light_green if verified else light_blue
+            peer_border = verified_green if verified else colors.HexColor("#94a3b8")
+            t = Table(rows, colWidths=[0.9 * inch, 2.5 * inch, 1.6 * inch, 1.2 * inch])
             t.setStyle(TableStyle([
-                ("BACKGROUND", (0, 0), (-1, 0), light_green),
-                ("BOX", (0, 0), (-1, -1), 0.5, peer_blue),
+                ("BACKGROUND", (0, 0), (-1, 0), peer_bg),
+                ("BOX", (0, 0), (-1, -1), 0.5, peer_border),
                 ("TOPPADDING", (0, 0), (-1, -1), 5),
                 ("BOTTOMPADDING", (0, 0), (-1, -1), 5),
                 ("LEFTPADDING", (0, 0), (-1, -1), 6),
@@ -809,9 +955,33 @@ def _build_routing_pdf(tree: dict, location: str) -> bytes:
                 ]))
                 elements.append(ds_table)
 
-    # Transit section
-    if transit:
-        elements.append(Paragraph("Transit / Unresolved", section_style))
+            # Transit reachable table under this peer
+            if peer_transit:
+                tr_rows = []
+                for tr in sorted(peer_transit, key=lambda t: t.get("name", "")):
+                    tr_rows.append([
+                        Paragraph(f"AS{tr['asn']}", cell_mono),
+                        Paragraph(tr.get("name", ""), cell_style),
+                        Paragraph(tr.get("info_type", ""), cell_small),
+                    ])
+                tr_table = Table(
+                    tr_rows,
+                    colWidths=[0.9 * inch, 3.0 * inch, 1.3 * inch],
+                )
+                tr_table.setStyle(TableStyle([
+                    ("BACKGROUND", (0, 0), (-1, -1), transit_bg),
+                    ("BOX", (0, 0), (-1, -1), 0.25, colors.HexColor("#cbd5e1")),
+                    ("LINEBELOW", (0, 0), (-1, -2), 0.25, colors.HexColor("#e2e8f0")),
+                    ("TOPPADDING", (0, 0), (-1, -1), 3),
+                    ("BOTTOMPADDING", (0, 0), (-1, -1), 3),
+                    ("LEFTPADDING", (0, 0), (0, -1), 20),
+                    ("LEFTPADDING", (1, 0), (-1, -1), 6),
+                ]))
+                elements.append(tr_table)
+
+    # Unresolved section
+    if unresolved:
+        elements.append(Paragraph("Unresolved Networks", section_style))
         t_rows = [
             [
                 Paragraph("<b>ASN</b>", cell_bold),
@@ -819,7 +989,7 @@ def _build_routing_pdf(tree: dict, location: str) -> bytes:
                 Paragraph("<b>Type</b>", cell_bold),
             ]
         ]
-        for node in sorted(transit, key=lambda n: n.get("name", "")):
+        for node in sorted(unresolved, key=lambda n: n.get("name", "")):
             t_rows.append([
                 Paragraph(f"AS{node['asn']}", cell_mono),
                 Paragraph(node.get("name", ""), cell_style),
@@ -845,7 +1015,8 @@ def _build_routing_pdf(tree: dict, location: str) -> bytes:
     elements.append(Spacer(1, 20))
     elements.append(Paragraph(
         "Data sourced from PeeringDB and RIPEstat. "
-        "Direct peer classification is based on AS-path frequency analysis "
+        "Direct peer verification uses PeeringDB facility and IX co-location data. "
+        "Peer classification is based on AS-path frequency analysis "
         "of Zenlayer prefix announcements.",
         ParagraphStyle("Footer", parent=styles["Normal"],
                         fontSize=8, textColor=colors.HexColor("#94a3b8")),

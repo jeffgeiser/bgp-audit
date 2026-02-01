@@ -41,6 +41,12 @@
             stroke: #334155;
             stroke-width: 2px;
         }
+        .link-path-transit {
+            fill: none;
+            stroke: #94a3b8;
+            stroke-width: 1px;
+            stroke-dasharray: 4 3;
+        }
 
         /* Tooltip */
         .tooltip {
@@ -111,6 +117,34 @@
                     </button>
                 </div>
 
+                <div class="flex items-center gap-2" x-show="treeData && transitNestedCount > 0">
+                    <label class="text-xs font-bold text-slate-500 uppercase tracking-wider">Transit</label>
+                    <button
+                        @click="showTransit = !showTransit; renderDiagram()"
+                        class="relative w-12 h-6 rounded-full transition-colors"
+                        :class="showTransit ? 'bg-[#00A9E0]' : 'bg-slate-300'"
+                    >
+                        <span
+                            class="absolute top-1 w-4 h-4 bg-white rounded-full shadow transition-transform"
+                            :class="showTransit ? 'left-7' : 'left-1'"
+                        ></span>
+                    </button>
+                </div>
+
+                <div class="flex items-center gap-2" x-show="treeData && unresolvedCount > 0">
+                    <label class="text-xs font-bold text-slate-500 uppercase tracking-wider">Unresolved</label>
+                    <button
+                        @click="showUnresolved = !showUnresolved; renderDiagram()"
+                        class="relative w-12 h-6 rounded-full transition-colors"
+                        :class="showUnresolved ? 'bg-[#00A9E0]' : 'bg-slate-300'"
+                    >
+                        <span
+                            class="absolute top-1 w-4 h-4 bg-white rounded-full shadow transition-transform"
+                            :class="showUnresolved ? 'left-7' : 'left-1'"
+                        ></span>
+                    </button>
+                </div>
+
                 <div x-show="loading" class="flex items-center gap-2 text-slate-500">
                     <svg class="animate-spin w-4 h-4" fill="none" viewBox="0 0 24 24">
                         <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle>
@@ -125,15 +159,19 @@
                         <span class="text-slate-600">Origin</span>
                     </div>
                     <div class="flex items-center gap-2 text-xs">
-                        <span class="w-3 h-3 rounded border-2 bg-white border-[#2563eb]"></span>
-                        <span class="text-slate-600">Direct Peer</span>
+                        <span class="w-3 h-3 rounded border-l-4 border-[#16a34a] bg-white border-2"></span>
+                        <span class="text-slate-600">Verified Peer</span>
+                    </div>
+                    <div class="flex items-center gap-2 text-xs">
+                        <span class="w-3 h-3 rounded border-2 bg-white border-[#94a3b8]"></span>
+                        <span class="text-slate-600">External Peer</span>
                     </div>
                     <div class="flex items-center gap-2 text-xs">
                         <span class="w-3 h-3 rounded border-2 bg-[#dbeafe] border-[#3b82f6]"></span>
                         <span class="text-slate-600">Downstream</span>
                     </div>
                     <div class="flex items-center gap-2 text-xs">
-                        <span class="w-3 h-3 rounded border-2 bg-[#f1f5f9] border-[#94a3b8]"></span>
+                        <span class="w-3 h-3 rounded border-2 bg-[#f1f5f9] border-[#94a3b8] border-dashed"></span>
                         <span class="text-slate-600">Transit</span>
                     </div>
                 </div>
@@ -164,10 +202,11 @@
                 <div>
                     <h2 class="font-bold text-slate-800" x-text="'Routing Flow: ' + selectedCity"></h2>
                     <p class="text-xs text-slate-500 mt-1">
-                        <span x-show="directPeerCount > 0" class="inline-flex items-center gap-1"><span class="w-2 h-2 rounded bg-white border border-blue-600 inline-block"></span> <span x-text="directPeerCount"></span> Direct Peers</span>
-                        <span x-show="directPeerCount > 0 && transitCount > 0"> &bull; </span>
-                        <span x-show="transitCount > 0" class="inline-flex items-center gap-1"><span class="w-2 h-2 rounded bg-slate-100 border border-slate-400 inline-block"></span> <span x-text="transitCount"></span> Transit</span>
-                        <span x-show="downstreamCount > 0"> &bull; <span class="inline-flex items-center gap-1"><span class="w-2 h-2 rounded bg-blue-100 border border-blue-400 inline-block"></span> <span x-text="downstreamCount"></span> Downstream</span></span>
+                        <span x-show="directPeerCount > 0" class="inline-flex items-center gap-1"><span class="w-2 h-2 rounded bg-white border border-green-600 inline-block"></span> <span x-text="directPeerCount"></span> Direct Peers</span>
+                        <span x-show="directPeerCount > 0 && downstreamCount > 0"> &bull; </span>
+                        <span x-show="downstreamCount > 0" class="inline-flex items-center gap-1"><span class="w-2 h-2 rounded bg-blue-100 border border-blue-400 inline-block"></span> <span x-text="downstreamCount"></span> Downstream</span>
+                        <span x-show="transitNestedCount > 0"> &bull; <span class="inline-flex items-center gap-1"><span class="w-2 h-2 rounded bg-slate-100 border border-slate-400 inline-block"></span> <span x-text="transitNestedCount"></span> Transit Reachable</span></span>
+                        <span x-show="unresolvedCount > 0"> &bull; <span class="inline-flex items-center gap-1 text-slate-400"><span x-text="unresolvedCount"></span> Unresolved</span></span>
                     </p>
                 </div>
                 <div class="flex items-center gap-2">
@@ -202,12 +241,14 @@
             return {
                 selectedCity: '',
                 expandSets: false,
+                showTransit: false,
+                showUnresolved: false,
                 loading: false,
                 treeData: null,
-                peerCount: 0,
                 directPeerCount: 0,
-                transitCount: 0,
                 downstreamCount: 0,
+                transitNestedCount: 0,
+                unresolvedCount: 0,
                 svg: null,
                 zoom: null,
                 gRef: null,
@@ -225,10 +266,10 @@
                         if (!response.ok) throw new Error('Failed to load routing data');
 
                         this.treeData = await response.json();
-                        this.peerCount = this.treeData.children?.length || 0;
                         this.directPeerCount = this.treeData.direct_peer_count || 0;
-                        this.transitCount = this.treeData.transit_count || 0;
                         this.downstreamCount = this.treeData.downstream_count || 0;
+                        this.transitNestedCount = this.treeData.transit_nested_count || 0;
+                        this.unresolvedCount = this.treeData.unresolved_count || 0;
                     } catch (err) {
                         console.error('Error loading routing flow:', err);
                     } finally {
@@ -246,28 +287,14 @@
                     d3.select('#tree-container').selectAll('*').remove();
 
                     const data = this.treeData;
-                    const children = data.children || [];
-
-                    // Separate direct peers and transit
-                    const directPeers = children.filter(c => c.is_direct);
-                    const transit = children.filter(c => !c.is_direct);
-
-                    // Collect all downstream nodes under direct peers
-                    const downstreamMap = {};
-                    directPeers.forEach(peer => {
-                        (peer.children || []).forEach(ds => {
-                            if (!downstreamMap[ds.asn]) {
-                                downstreamMap[ds.asn] = { ...ds, parents: [] };
-                            }
-                            downstreamMap[ds.asn].parents.push(peer.asn);
-                        });
-                    });
-                    const downstreamNodes = Object.values(downstreamMap);
+                    const peers = data.children || [];
+                    const unresolvedNodes = this.showUnresolved ? (data.unresolved || []) : [];
 
                     // Layout constants
-                    const boxW = 150, boxH = 50;
-                    const colGap = 100;
-                    const rowGap = 12;
+                    const boxW = 170, boxH = 50;
+                    const colGap = 90;
+                    const rowGap = 10;
+                    const groupGap = 24;
                     const padTop = 60, padLeft = 40, padRight = 40, padBottom = 40;
 
                     // Column x positions
@@ -275,35 +302,81 @@
                     const col1x = padLeft + boxW + colGap;
                     const col2x = padLeft + (boxW + colGap) * 2;
 
-                    // Compute column heights
-                    const originCount = 1; // Single root node
-                    const col1Count = directPeers.length + transit.length;
-                    const col2Count = downstreamNodes.length;
-                    const maxRows = Math.max(originCount, col1Count, col2Count, 1);
+                    // Build per-peer layout data
+                    const peerLayouts = [];
+                    let hasCol2 = false;
 
-                    const svgHeight = padTop + maxRows * (boxH + rowGap) + padBottom;
-                    const svgWidth = col2Count > 0
+                    peers.forEach(peer => {
+                        const downstream = peer.children || [];
+                        const transit = this.showTransit ? (peer.transit_children || []) : [];
+                        const col2Nodes = [...downstream, ...transit];
+                        if (col2Nodes.length > 0) hasCol2 = true;
+                        peerLayouts.push({ peer, downstream, transit, col2Nodes });
+                    });
+
+                    // Calculate positions — peer centered on its col2 group
+                    let curY = padTop + 30;
+                    peerLayouts.forEach(layout => {
+                        const col2H = layout.col2Nodes.length * (boxH + rowGap);
+                        const groupH = Math.max(boxH, col2H);
+                        layout.peerY = curY + (groupH - boxH) / 2;
+                        layout.col2StartY = curY;
+                        layout.groupH = groupH;
+                        curY += groupH + groupGap;
+                    });
+
+                    // Unresolved section below peers
+                    let unresolvedStartY = curY;
+                    if (unresolvedNodes.length > 0) {
+                        curY += unresolvedNodes.length * (boxH + rowGap) + groupGap;
+                    }
+
+                    // Origin vertical center
+                    const allPeerYs = peerLayouts.map(l => l.peerY + boxH / 2);
+                    const originY = allPeerYs.length > 0
+                        ? (allPeerYs[0] + allPeerYs[allPeerYs.length - 1]) / 2 - boxH / 2
+                        : padTop + 30;
+
+                    // SVG dimensions
+                    const svgHeight = Math.max(600, curY + padBottom);
+                    const svgWidth = hasCol2
                         ? col2x + boxW + padRight
                         : col1x + boxW + padRight;
 
-                    container.style.height = Math.max(600, svgHeight) + 'px';
+                    container.style.height = svgHeight + 'px';
 
                     this.svg = d3.select('#tree-container')
                         .append('svg')
                         .attr('width', '100%')
-                        .attr('height', Math.max(600, svgHeight))
-                        .attr('viewBox', `0 0 ${svgWidth} ${Math.max(600, svgHeight)}`)
+                        .attr('height', svgHeight)
+                        .attr('viewBox', `0 0 ${svgWidth} ${svgHeight}`)
                         .style('background', '#ffffff');
 
                     this.gRef = this.svg.append('g');
+                    const g = this.gRef;
 
-                    const gRef = this.gRef;
                     this.zoom = d3.zoom()
                         .scaleExtent([0.3, 3])
-                        .on('zoom', (event) => gRef.attr('transform', event.transform));
+                        .on('zoom', (event) => g.attr('transform', event.transform));
                     this.svg.call(this.zoom);
 
-                    const g = this.gRef;
+                    // Arrowhead marker
+                    const defs = this.svg.append('defs');
+                    defs.append('marker')
+                        .attr('id', 'arrowhead')
+                        .attr('viewBox', '0 0 10 10')
+                        .attr('refX', 9).attr('refY', 5)
+                        .attr('markerWidth', 6).attr('markerHeight', 6)
+                        .attr('orient', 'auto')
+                        .append('path').attr('d', 'M 0 0 L 10 5 L 0 10 z').attr('fill', '#334155');
+
+                    defs.append('marker')
+                        .attr('id', 'arrowhead-light')
+                        .attr('viewBox', '0 0 10 10')
+                        .attr('refX', 9).attr('refY', 5)
+                        .attr('markerWidth', 6).attr('markerHeight', 6)
+                        .attr('orient', 'auto')
+                        .append('path').attr('d', 'M 0 0 L 10 5 L 0 10 z').attr('fill', '#94a3b8');
 
                     // Timestamp
                     const now = new Date();
@@ -319,181 +392,191 @@
                         .style('fill', '#334155')
                         .text(ts);
 
-                    // Background regions
+                    // ---- Background Regions ----
+
                     // Origins region (green)
                     const origRegionH = boxH + 40;
-                    const origRegionY = padTop - 10;
                     g.append('rect')
-                        .attr('x', col0x - 15)
-                        .attr('y', origRegionY)
-                        .attr('width', boxW + 30)
-                        .attr('height', origRegionH)
+                        .attr('x', col0x - 15).attr('y', originY - 20)
+                        .attr('width', boxW + 30).attr('height', origRegionH)
                         .attr('rx', 8)
-                        .attr('fill', '#dcfce7')
-                        .attr('stroke', '#86efac')
-                        .attr('stroke-width', 1);
+                        .attr('fill', '#dcfce7').attr('stroke', '#86efac').attr('stroke-width', 1);
                     g.append('text')
-                        .attr('x', col0x + boxW / 2)
-                        .attr('y', origRegionY + 16)
+                        .attr('x', col0x + boxW / 2).attr('y', originY - 4)
                         .attr('text-anchor', 'middle')
-                        .style('font-size', '11px')
-                        .style('font-weight', '600')
-                        .style('fill', '#15803d')
+                        .style('font-size', '11px').style('font-weight', '600').style('fill', '#15803d')
                         .text('Origins');
 
-                    // Peers region (blue)
-                    const peerRegionH = Math.max(col1Count, 1) * (boxH + rowGap) + 30;
-                    g.append('rect')
-                        .attr('x', col1x - 15)
-                        .attr('y', padTop - 10)
-                        .attr('width', (col2Count > 0 ? (col2x + boxW + 15) - (col1x - 15) : boxW + 30))
-                        .attr('height', Math.max(peerRegionH, origRegionH))
-                        .attr('rx', 8)
-                        .attr('fill', '#eff6ff')
-                        .attr('stroke', '#bfdbfe')
-                        .attr('stroke-width', 1);
+                    // Peers region
+                    if (peers.length > 0) {
+                        const peerRegionTop = padTop + 10;
+                        const peerRegionBot = peerLayouts.length > 0
+                            ? peerLayouts[peerLayouts.length - 1].peerY + boxH + 15
+                            : peerRegionTop + 80;
+                        const regionW = hasCol2
+                            ? (col2x + boxW + 15) - (col1x - 15)
+                            : boxW + 30;
+                        g.append('rect')
+                            .attr('x', col1x - 15).attr('y', peerRegionTop)
+                            .attr('width', regionW)
+                            .attr('height', peerRegionBot - peerRegionTop)
+                            .attr('rx', 8)
+                            .attr('fill', '#eff6ff').attr('stroke', '#bfdbfe').attr('stroke-width', 1);
 
-                    // Section labels
-                    if (directPeers.length > 0) {
+                        // Column headers
                         g.append('text')
-                            .attr('x', col1x + boxW / 2)
-                            .attr('y', padTop + 6)
+                            .attr('x', col1x + boxW / 2).attr('y', peerRegionTop + 16)
                             .attr('text-anchor', 'middle')
-                            .style('font-size', '11px')
-                            .style('font-weight', '600')
-                            .style('fill', '#1d4ed8')
+                            .style('font-size', '11px').style('font-weight', '600').style('fill', '#1d4ed8')
                             .text('Direct Peers');
-                    }
-                    if (col2Count > 0) {
-                        g.append('text')
-                            .attr('x', col2x + boxW / 2)
-                            .attr('y', padTop + 6)
-                            .attr('text-anchor', 'middle')
-                            .style('font-size', '11px')
-                            .style('font-weight', '600')
-                            .style('fill', '#1d4ed8')
-                            .text('Downstream');
+
+                        if (hasCol2) {
+                            g.append('text')
+                                .attr('x', col2x + boxW / 2).attr('y', peerRegionTop + 16)
+                                .attr('text-anchor', 'middle')
+                                .style('font-size', '11px').style('font-weight', '600').style('fill', '#1d4ed8')
+                                .text('Downstream');
+                        }
                     }
 
-                    // Helper: draw a box node
-                    const drawBox = (x, y, asn, name, fill, stroke) => {
-                        const group = g.append('g')
+                    // ---- Helper: draw a box node ----
+                    const drawBox = (x, y, node, fill, stroke, opts = {}) => {
+                        const grp = g.append('g')
                             .attr('class', 'node-box')
                             .attr('transform', `translate(${x},${y})`);
-                        group.append('rect')
-                            .attr('width', boxW)
-                            .attr('height', boxH)
-                            .attr('fill', fill)
-                            .attr('stroke', stroke);
-                        group.append('text')
+                        grp.append('rect')
+                            .attr('width', boxW).attr('height', boxH)
+                            .attr('fill', fill).attr('stroke', stroke);
+
+                        if (opts.dashed) {
+                            grp.select('rect').attr('stroke-dasharray', '5 3');
+                        }
+
+                        // Verification badge bar on left
+                        if (opts.verified !== undefined) {
+                            const badgeColor = opts.verified ? '#16a34a' : '#f59e0b';
+                            grp.append('rect')
+                                .attr('x', 0).attr('y', 0)
+                                .attr('width', 5).attr('height', boxH)
+                                .attr('fill', badgeColor)
+                                .attr('rx', 2);
+                        }
+
+                        // ASN label
+                        const textOffsetX = opts.verified !== undefined ? 5 : 0;
+                        grp.append('text')
                             .attr('class', 'asn-label')
-                            .attr('x', boxW / 2)
+                            .attr('x', (boxW + textOffsetX) / 2)
                             .attr('y', 20)
                             .attr('text-anchor', 'middle')
-                            .text(`AS${asn}`);
-                        const displayName = (name || '').length > 18
-                            ? name.substring(0, 16) + '...'
-                            : (name || `AS${asn}`);
-                        group.append('text')
+                            .text('AS' + node.asn);
+
+                        // Name label (truncate)
+                        const maxLen = 20;
+                        const name = node.name || ('AS' + node.asn);
+                        const displayName = name.length > maxLen
+                            ? name.substring(0, maxLen - 2) + '\u2026'
+                            : name;
+                        grp.append('text')
                             .attr('class', 'name-label')
-                            .attr('x', boxW / 2)
+                            .attr('x', (boxW + textOffsetX) / 2)
                             .attr('y', 37)
                             .attr('text-anchor', 'middle')
                             .text(displayName);
 
                         // Tooltip
-                        group.on('mouseover', (event) => {
-                                const tooltip = document.getElementById('tooltip');
-                                let content = `<strong>${name || 'AS' + asn}</strong>`;
-                                content += `<br>ASN: ${asn}`;
-                                tooltip.innerHTML = content;
-                                tooltip.style.display = 'block';
-                                tooltip.style.left = (event.pageX + 15) + 'px';
-                                tooltip.style.top = (event.pageY - 10) + 'px';
-                            })
-                            .on('mouseout', () => {
-                                document.getElementById('tooltip').style.display = 'none';
-                            });
+                        grp.on('mouseover', (event) => {
+                            const tooltip = document.getElementById('tooltip');
+                            let content = '<strong>' + (node.name || 'AS' + node.asn) + '</strong>';
+                            content += '<br>ASN: ' + node.asn;
+                            if (node.info_type) content += '<br>Type: ' + node.info_type;
+                            if (node.verification) content += '<br>Status: ' + node.verification;
+                            if (node.shared_ix && node.shared_ix.length > 0)
+                                content += '<br>Shared IX: ' + node.shared_ix.join(', ');
+                            if (node.category) content += '<br>Role: ' + node.category;
+                            const nDown = (node.children || []).length;
+                            const nTransit = (node.transit_children || []).length;
+                            if (nDown > 0) content += '<br>Downstream: ' + nDown;
+                            if (nTransit > 0) content += '<br>Transit Reachable: ' + nTransit;
+                            tooltip.innerHTML = content;
+                            tooltip.style.display = 'block';
+                            tooltip.style.left = (event.pageX + 15) + 'px';
+                            tooltip.style.top = (event.pageY - 10) + 'px';
+                        }).on('mouseout', () => {
+                            document.getElementById('tooltip').style.display = 'none';
+                        });
 
                         return { cx: x + boxW, cy: y + boxH / 2, lx: x, ly: y + boxH / 2 };
                     };
 
-                    // Helper: orthogonal connector
+                    // ---- Helper: orthogonal connector ----
                     const drawLink = (x1, y1, x2, y2, cssClass) => {
                         const midX = (x1 + x2) / 2;
+                        const markerId = cssClass === 'link-path-transit' ? 'url(#arrowhead-light)' : 'url(#arrowhead)';
                         g.append('path')
                             .attr('class', cssClass || 'link-path')
                             .attr('d', `M${x1},${y1} H${midX} V${y2} H${x2}`)
-                            .attr('marker-end', 'url(#arrowhead)');
+                            .attr('marker-end', markerId);
                     };
 
-                    // Arrowhead marker
-                    this.svg.append('defs').append('marker')
-                        .attr('id', 'arrowhead')
-                        .attr('viewBox', '0 0 10 10')
-                        .attr('refX', 9)
-                        .attr('refY', 5)
-                        .attr('markerWidth', 6)
-                        .attr('markerHeight', 6)
-                        .attr('orient', 'auto')
-                        .append('path')
-                        .attr('d', 'M 0 0 L 10 5 L 0 10 z')
-                        .attr('fill', '#334155');
-
-                    // Position origin at vertical center of col1
-                    const col1TotalH = col1Count * (boxH + rowGap) - rowGap;
-                    const originY = padTop + 20 + Math.max(0, col1TotalH / 2 - boxH / 2);
-
+                    // ---- Draw Origin ----
                     const origin = drawBox(
                         col0x, originY,
-                        data.asn, data.name.split('(')[0].trim(),
+                        { asn: data.asn, name: data.name.split('(')[0].trim() },
                         '#dcfce7', '#16a34a'
                     );
 
-                    // Draw Direct Peers in col1 (top section)
-                    const peerAnchors = {};
-                    const col1StartY = padTop + 20;
+                    // ---- Draw Peers & their children ----
+                    peerLayouts.forEach(layout => {
+                        const peer = layout.peer;
+                        const isVerified = peer.verified;
 
-                    directPeers.forEach((peer, i) => {
-                        const y = col1StartY + i * (boxH + rowGap);
-                        const anchors = drawBox(
-                            col1x, y, peer.asn, peer.name,
-                            '#ffffff', '#2563eb'
+                        // Peer box
+                        const peerFill = '#ffffff';
+                        const peerStroke = isVerified ? '#16a34a' : '#64748b';
+                        const peerAnchors = drawBox(
+                            col1x, layout.peerY, peer,
+                            peerFill, peerStroke,
+                            { verified: peer.verified }
                         );
-                        peerAnchors[peer.asn] = anchors;
-                        drawLink(origin.cx, origin.cy, anchors.lx, anchors.ly, 'link-path-direct');
-                    });
 
-                    // Draw Transit nodes in col1 (below direct peers)
-                    const transitStartIdx = directPeers.length;
-                    transit.forEach((node, i) => {
-                        const y = col1StartY + (transitStartIdx + i) * (boxH + rowGap);
-                        const anchors = drawBox(
-                            col1x, y, node.asn, node.name,
-                            '#f1f5f9', '#94a3b8'
-                        );
-                        drawLink(origin.cx, origin.cy, anchors.lx, anchors.ly, 'link-path');
-                    });
+                        // Origin -> Peer link
+                        drawLink(origin.cx, origin.cy, peerAnchors.lx, peerAnchors.ly, 'link-path-direct');
 
-                    // Draw Downstream nodes in col2
-                    if (downstreamNodes.length > 0) {
-                        // Center col2 vertically relative to col1 peers
-                        const col2StartY = padTop + 20;
-                        downstreamNodes.sort((a, b) => (a.name || '').localeCompare(b.name || ''));
-
-                        downstreamNodes.forEach((ds, i) => {
-                            const y = col2StartY + i * (boxH + rowGap);
+                        // Col2 nodes: downstream first, then transit
+                        layout.col2Nodes.forEach((node, i) => {
+                            const ny = layout.col2StartY + i * (boxH + rowGap);
+                            const isTransit = node.category === 'Transit Reachable';
+                            const fill = isTransit ? '#f1f5f9' : '#dbeafe';
+                            const stroke = isTransit ? '#94a3b8' : '#3b82f6';
                             const anchors = drawBox(
-                                col2x, y, ds.asn, ds.name,
-                                '#dbeafe', '#3b82f6'
+                                col2x, ny, node,
+                                fill, stroke,
+                                { dashed: isTransit }
                             );
-                            // Draw links from each parent peer to this downstream
-                            (ds.parents || []).forEach(parentAsn => {
-                                const pa = peerAnchors[parentAsn];
-                                if (pa) {
-                                    drawLink(pa.cx, pa.cy, anchors.lx, anchors.ly, 'link-path');
-                                }
-                            });
+                            const linkClass = isTransit ? 'link-path-transit' : 'link-path';
+                            drawLink(peerAnchors.cx, peerAnchors.cy, anchors.lx, anchors.ly, linkClass);
+                        });
+                    });
+
+                    // ---- Draw Unresolved section ----
+                    if (unresolvedNodes.length > 0) {
+                        // Section label
+                        g.append('text')
+                            .attr('x', col1x + boxW / 2)
+                            .attr('y', unresolvedStartY - 6)
+                            .attr('text-anchor', 'middle')
+                            .style('font-size', '11px').style('font-weight', '600').style('fill', '#94a3b8')
+                            .text('Unresolved (' + unresolvedNodes.length + ')');
+
+                        unresolvedNodes.forEach((node, i) => {
+                            const ny = unresolvedStartY + i * (boxH + rowGap);
+                            const anchors = drawBox(
+                                col1x, ny, node,
+                                '#f8fafc', '#cbd5e1',
+                                { dashed: true }
+                            );
+                            drawLink(origin.cx, origin.cy, anchors.lx, anchors.ly, 'link-path-transit');
                         });
                     }
                 },
