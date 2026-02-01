@@ -190,22 +190,24 @@
 
                 <!-- Direct peer badges -->
                 <template x-if="summary?.direct_peers?.length > 0">
-                    <div class="ml-auto flex items-center gap-2 flex-wrap">
-                        <span class="text-[10px] font-black text-slate-400 uppercase tracking-wider mr-1">Direct Peers:</span>
-                        <template x-for="dp in summary.direct_peers" :key="dp.asn">
-                            <span class="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-full bg-amber-50 border border-amber-200 text-xs font-bold text-amber-800">
-                                <span class="w-1.5 h-1.5 rounded-full bg-amber-400"></span>
-                                <span x-text="dp.name" class="max-w-[120px] truncate"></span>
-                                <span class="text-amber-500 font-mono text-[10px]" x-text="'AS' + dp.asn"></span>
-                            </span>
-                        </template>
+                    <div class="w-full mt-3 border-t border-slate-100 pt-3">
+                        <p class="text-[10px] font-black text-slate-400 uppercase tracking-wider mb-2">Direct On-Net Peers</p>
+                        <div class="grid grid-cols-3 gap-2">
+                            <template x-for="dp in summary.direct_peers" :key="dp.asn">
+                                <span class="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-full bg-amber-50 border border-amber-200 text-xs font-bold text-amber-800 truncate">
+                                    <span class="w-1.5 h-1.5 rounded-full bg-amber-400 flex-shrink-0"></span>
+                                    <span x-text="dp.name" class="truncate"></span>
+                                    <span class="text-amber-500 font-mono text-[10px] flex-shrink-0" x-text="'AS' + dp.asn"></span>
+                                </span>
+                            </template>
+                        </div>
                     </div>
                 </template>
             </div>
         </div>
 
         <!-- Result Table Container -->
-        <div class="flex-1 bg-white rounded-3xl border border-slate-200 shadow-xl shadow-slate-200/50 overflow-hidden flex flex-col">
+        <div class="flex-1 min-h-0 bg-white rounded-3xl border border-slate-200 shadow-xl shadow-slate-200/50 flex flex-col overflow-hidden">
             <!-- Table Action Bar -->
             <div class="px-8 py-6 bg-slate-50/50 border-b border-slate-100 flex flex-col gap-4">
                 <div class="flex flex-col md:flex-row justify-between items-center gap-6">
@@ -230,14 +232,14 @@
 
                 <!-- Health Status Filters -->
                 <div x-show="networks.length > 0" class="flex items-center gap-3">
-                    <span class="text-[10px] font-black text-slate-400 uppercase tracking-wider">Health</span>
+                    <span class="text-[10px] font-black text-slate-400 uppercase tracking-wider">Path Quality</span>
                     <button
                         @click="healthFilter = healthFilter === 'green' ? '' : 'green'"
                         class="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-full text-[10px] font-bold uppercase tracking-wider border transition-all"
                         :class="healthFilter === 'green' ? 'bg-emerald-500 text-white border-emerald-500 shadow-lg' : 'bg-white text-emerald-700 border-emerald-200 hover:bg-emerald-50'"
                     >
                         <span class="w-2 h-2 rounded-full" :class="healthFilter === 'green' ? 'bg-white' : 'bg-emerald-400'"></span>
-                        Peered
+                        Direct On-Net
                     </button>
                     <button
                         @click="healthFilter = healthFilter === 'yellow' ? '' : 'yellow'"
@@ -245,7 +247,7 @@
                         :class="healthFilter === 'yellow' ? 'bg-amber-500 text-white border-amber-500 shadow-lg' : 'bg-white text-amber-700 border-amber-200 hover:bg-amber-50'"
                     >
                         <span class="w-2 h-2 rounded-full" :class="healthFilter === 'yellow' ? 'bg-white' : 'bg-amber-400'"></span>
-                        Opportunity
+                        Exchange / IXP
                     </button>
                     <button
                         @click="healthFilter = healthFilter === 'red' ? '' : 'red'"
@@ -253,7 +255,7 @@
                         :class="healthFilter === 'red' ? 'bg-red-500 text-white border-red-500 shadow-lg' : 'bg-white text-red-700 border-red-200 hover:bg-red-50'"
                     >
                         <span class="w-2 h-2 rounded-full" :class="healthFilter === 'red' ? 'bg-white' : 'bg-red-400'"></span>
-                        No Peering
+                        Upstream Transit
                     </button>
                     <button
                         x-show="healthFilter"
@@ -329,7 +331,7 @@
                                                               :class="getHealth(net) === 'green' ? 'text-emerald-600' : getHealth(net) === 'yellow' ? 'text-amber-600' : 'text-red-600'">
                                                             <span class="w-2 h-2 rounded-full"
                                                                   :class="getHealth(net) === 'green' ? 'bg-emerald-400' : getHealth(net) === 'yellow' ? 'bg-amber-400' : 'bg-red-400'"></span>
-                                                            <span x-text="getHealth(net) === 'green' ? 'Direct Peer (Active)' : getHealth(net) === 'yellow' ? 'Peering Opportunity' : 'No Peering Relationship'"></span>
+                                                            <span x-text="getHealth(net) === 'green' ? 'Direct On-Net Path' : getHealth(net) === 'yellow' ? 'Exchange / IXP Path' : 'Upstream Transit Path'"></span>
                                                         </span>
                                                     </div>
                                                     <div>

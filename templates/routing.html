@@ -98,22 +98,22 @@
                     Zenlayer Infrastructure (AS21859, AS4229). The starting point of the audit.
                 </div>
             </div>
-            <!-- Verified Local Peer -->
+            <!-- Direct On-Net Path -->
             <div class="flex items-center gap-1.5 text-xs relative group">
                 <span class="w-3.5 h-3.5 rounded-sm border-2 bg-[#fff7ed] border-[#16a34a]"></span>
-                <span class="text-slate-600 font-medium">Verified Local Peer</span>
+                <span class="text-slate-600 font-medium">Direct On-Net Path</span>
                 <span class="w-3.5 h-3.5 rounded-full bg-slate-200 text-slate-500 text-[9px] font-bold flex items-center justify-center cursor-help">i</span>
                 <div class="hidden group-hover:block absolute left-0 top-full mt-1 z-50 w-64 bg-slate-800 text-white text-[11px] rounded-lg px-3 py-2 shadow-lg">
-                    Direct BGP adjacency confirmed via PeeringDB to be in the same facility.
+                    Direct BGP adjacency confirmed via PeeringDB to be co-located in the same facility. Lowest-latency path.
                 </div>
             </div>
-            <!-- Remote / Logical Peer -->
+            <!-- Exchange/IXP Path -->
             <div class="flex items-center gap-1.5 text-xs relative group">
                 <span class="w-3.5 h-3.5 rounded-sm border-2 bg-[#fff7ed] border-[#ea580c]"></span>
-                <span class="text-slate-600 font-medium">Remote / Logical Peer</span>
+                <span class="text-slate-600 font-medium">Exchange / IXP Path</span>
                 <span class="w-3.5 h-3.5 rounded-full bg-slate-200 text-slate-500 text-[9px] font-bold flex items-center justify-center cursor-help">i</span>
                 <div class="hidden group-hover:block absolute left-0 top-full mt-1 z-50 w-64 bg-slate-800 text-white text-[11px] rounded-lg px-3 py-2 shadow-lg">
-                    Discovered 1-hop BGP neighbor likely connected via a regional Internet Exchange (IXP).
+                    1-hop BGP neighbor connected via a shared regional Internet Exchange (IXP). Near-direct performance.
                 </div>
             </div>
             <!-- Downstream -->
@@ -125,13 +125,13 @@
                     Verified customers of our direct peers. High-priority, direct-to-destination paths.
                 </div>
             </div>
-            <!-- Reachable Transit -->
+            <!-- Upstream Transit Path -->
             <div class="flex items-center gap-1.5 text-xs relative group">
                 <span class="w-3.5 h-3.5 rounded-sm border-2 bg-[#f1f5f9] border-[#94a3b8]"></span>
-                <span class="text-slate-600 font-medium">Reachable Transit</span>
+                <span class="text-slate-600 font-medium">Upstream Transit Path</span>
                 <span class="w-3.5 h-3.5 rounded-full bg-slate-200 text-slate-500 text-[9px] font-bold flex items-center justify-center cursor-help">i</span>
-                <div class="hidden group-hover:block absolute left-0 top-full mt-1 z-50 w-60 bg-slate-800 text-white text-[11px] rounded-lg px-3 py-2 shadow-lg">
-                    General internet networks reachable through our peers.
+                <div class="hidden group-hover:block absolute left-0 top-full mt-1 z-50 w-64 bg-slate-800 text-white text-[11px] rounded-lg px-3 py-2 shadow-lg">
+                    General internet networks reachable through upstream transit providers. Multi-hop path.
                 </div>
             </div>
         </div>
@@ -203,9 +203,9 @@
                 <div>
                     <h2 class="font-bold text-slate-800" x-text="'Routing Flow: ' + selectedCity"></h2>
                     <p class="text-xs text-slate-500 mt-1">
-                        <span x-text="directPeerCount + ' Verified Peers'"></span>
+                        <span x-text="directPeerCount + ' Direct Peers'"></span>
                         <span x-show="downstreamCount > 0"> &bull; <span x-text="downstreamCount + ' Downstream'"></span></span>
-                        <span x-show="transitNestedCount > 0"> &bull; <span x-text="transitNestedCount + ' Reachable Transit'"></span></span>
+                        <span x-show="transitNestedCount > 0"> &bull; <span x-text="transitNestedCount + ' Upstream Transit'"></span></span>
                         &mdash; <span class="text-slate-400">Click a peer to expand/collapse</span>
                     </p>
                 </div>
