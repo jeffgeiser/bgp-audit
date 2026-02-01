@@ -35,7 +35,7 @@
         /* Sankey ribbon connectors */
         .ribbon { fill: none; stroke-linecap: round; }
         .ribbon-origin  { stroke: #86efac; stroke-width: 2.5; opacity: 0.55; }
-        .ribbon-downstream { stroke: #60a5fa; stroke-width: 2; opacity: 0.5; }
+        .ribbon-downstream { stroke: #60a5fa; stroke-width: 1.8; opacity: 0.45; stroke-dasharray: 8 4; }
         .ribbon-transit { stroke: #94a3b8; stroke-width: 1.2; opacity: 0.35; stroke-dasharray: 5 3; }
 
         /* Tooltip */
@@ -100,7 +100,7 @@
             </div>
             <!-- Verified Local Peer -->
             <div class="flex items-center gap-1.5 text-xs relative group">
-                <span class="w-3.5 h-3.5 rounded-sm border-2 bg-[#fff7ed] border-[#16a34a]"></span>
+                <span class="w-3.5 h-3.5 rounded-sm border-2 bg-[#dcfce7] border-[#16a34a]"></span>
                 <span class="text-slate-600 font-medium">Verified Local Peer</span>
                 <span class="w-3.5 h-3.5 rounded-full bg-slate-200 text-slate-500 text-[9px] font-bold flex items-center justify-center cursor-help">i</span>
                 <div class="hidden group-hover:block absolute left-0 top-full mt-1 z-50 w-64 bg-slate-800 text-white text-[11px] rounded-lg px-3 py-2 shadow-lg">
@@ -252,8 +252,8 @@
                     this.directPeerCount = this.treeData.direct_peer_count || 0;
                     this.downstreamCount = this.treeData.downstream_count || 0;
                     this.transitNestedCount = this.treeData.transit_nested_count || 0;
-                    // All peers collapsed by default
-                    (this.treeData.children || []).forEach(p => { this.expandedPeers[p.asn] = false; });
+                    // All peers expanded by default to show hierarchy
+                    (this.treeData.children || []).forEach(p => { this.expandedPeers[p.asn] = true; });
                 } catch (err) {
                     console.error('Error loading routing flow:', err);
                 } finally {
@@ -290,9 +290,9 @@
 
                 // ---- Layout constants ----
                 const boxW = 180, boxH = 48;
-                const colGap = 100;
-                const rowGap = 8;
-                const groupGap = 14;
+                const colGap = 120;
+                const rowGap = 14;
+                const groupGap = 24;
                 const padTop = 55, padLeft = 40, padRight = 40, padBottom = 40;
 
                 const col0x = padLeft;
@@ -512,10 +512,11 @@
                     const kids = peer.children || [];
                     const isOpen = self.expandedPeers[peer.asn];
 
+                    const peerFill = peer.verified ? '#dcfce7' : '#fff7ed';
                     const peerStroke = peer.verified ? '#16a34a' : '#ea580c';
                     const peerAnchors = drawBox(
                         col1x, row.y, peer,
-                        '#fff7ed', peerStroke,
+                        peerFill, peerStroke,
                         {
                             accentColor: peer.verified ? '#16a34a' : '#f59e0b',
                             childCount: kids.length,
