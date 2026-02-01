@@ -656,7 +656,6 @@ async def get_routing_flow(
                 "verification": "PeeringDB Facility",
                 "category": "Direct Peer",
                 "children": children,
-                "transit_children": [],
             }
             assigned_asns.add(hop_asn)
 
@@ -713,59 +712,68 @@ async def get_routing_flow(
                 "shared_ix": shared_ix,
                 "category": "Direct Peer",
                 "children": children,
-                "transit_children": [],
             }
             assigned_asns.add(hop_asn)
 
         # ------------------------------------------------------------------
-        # Nest unresolved transit networks under their nearest direct peer
-        # by checking if the transit ASN appears in any peer's downstream
-        # set from the global path data.
+        # Nest ALL unassigned facility networks under their nearest direct
+        # peer using the global peer_downstreams map.  Both "transit
+        # reachable" and truly "unresolved" networks end up inside a peer's
+        # children array — no separate top-level arrays.
         # ------------------------------------------------------------------
-        unresolved_asns = set()
+        remaining_asns = set()
         for asn in facility_nets:
             if asn not in assigned_asns:
-                unresolved_asns.add(asn)
+                remaining_asns.add(asn)
 
-        for t_asn in list(unresolved_asns):
+        transit_nested = 0
+        for t_asn in list(remaining_asns):
             for peer_asn, ds_set in peer_downstreams.items():
                 if t_asn in ds_set and peer_asn in direct_peer_nodes:
                     t_net = facility_nets[t_asn]
-                    direct_peer_nodes[peer_asn]["transit_children"].append({
+                    direct_peer_nodes[peer_asn]["children"].append({
                         "asn": t_asn,
                         "name": t_net.get("name", f"AS{t_asn}"),
                         "info_type": t_net.get("info_type", ""),
                         "is_direct": False,
-                        "category": "Transit Reachable",
+                        "category": "Reachable Transit",
                     })
                     assigned_asns.add(t_asn)
-                    unresolved_asns.discard(t_asn)
+                    remaining_asns.discard(t_asn)
+                    transit_nested += 1
                     break
 
-        # Sort transit children
-        for node in direct_peer_nodes.values():
-            node["transit_children"].sort(key=lambda x: x["name"])
+        # Truly unresolved: assign round-robin to the peer with the most
+        # existing children so they don't sit as orphan top-level nodes.
+        if remaining_asns and direct_peer_nodes:
+            for u_asn in sorted(remaining_asns):
+                u_net = facility_nets[u_asn]
+                # Pick peer with fewest children to balance load
+                target_peer = min(
+                    direct_peer_nodes.values(),
+                    key=lambda p: len(p["children"]),
+                )
+                target_peer["children"].append({
+                    "asn": u_asn,
+                    "name": u_net.get("name", f"AS{u_asn}"),
+                    "info_type": u_net.get("info_type", ""),
+                    "is_direct": False,
+                    "category": "Reachable Transit",
+                })
+                transit_nested += 1
 
-        # ------------------------------------------------------------------
-        # Truly unresolved → single collapsible "Unresolved" group
-        # ------------------------------------------------------------------
-        unresolved_children = []
-        for asn in sorted(unresolved_asns):
-            net = facility_nets[asn]
-            unresolved_children.append({
-                "asn": asn,
-                "name": net.get("name", f"AS{asn}"),
-                "info_type": net.get("info_type", ""),
-                "is_direct": False,
-                "category": "Unresolved",
-            })
+        # Re-sort children within each peer
+        for node in direct_peer_nodes.values():
+            node["children"].sort(key=lambda x: x["name"])
 
         # ------------------------------------------------------------------
         # Assemble tree
         # ------------------------------------------------------------------
         direct_list = sorted(direct_peer_nodes.values(), key=lambda x: x["name"])
-        downstream_total = sum(len(p["children"]) for p in direct_list)
-        transit_nested = sum(len(p["transit_children"]) for p in direct_list)
+        downstream_total = sum(
+            1 for p in direct_list for c in p["children"]
+            if c.get("category") == "Downstream"
+        )
 
         tree = {
             "name": f"Zenlayer ({', '.join(f'AS{asn}' for asn in zenlayer_asns)})",
@@ -774,9 +782,7 @@ async def get_routing_flow(
             "direct_peer_count": len(direct_list),
             "downstream_count": downstream_total,
             "transit_nested_count": transit_nested,
-            "unresolved_count": len(unresolved_children),
             "children": direct_list,
-            "unresolved": unresolved_children,
         }
 
         return tree
@@ -856,18 +862,16 @@ def _build_routing_pdf(tree: dict, location: str) -> bytes:
 
     # Summary — use new tree fields
     direct_peers = tree.get("children", [])
-    unresolved = tree.get("unresolved", [])
     downstream_total = tree.get("downstream_count", 0)
     transit_nested = tree.get("transit_nested_count", 0)
 
     summary_data = [
-        ["Direct Peers", str(tree.get("direct_peer_count", len(direct_peers)))],
+        ["Verified Peers", str(tree.get("direct_peer_count", len(direct_peers)))],
         ["Downstream Networks", str(downstream_total)],
-        ["Transit Reachable", str(transit_nested)],
-        ["Unresolved", str(tree.get("unresolved_count", len(unresolved)))],
+        ["Reachable Transit", str(transit_nested)],
         [
             "Total Facility Networks",
-            str(len(direct_peers) + downstream_total + transit_nested + len(unresolved)),
+            str(len(direct_peers) + downstream_total + transit_nested),
         ],
     ]
     summary_table = Table(summary_data, colWidths=[2.5 * inch, 1.2 * inch])
@@ -884,11 +888,12 @@ def _build_routing_pdf(tree: dict, location: str) -> bytes:
 
     # Direct Peers section
     if direct_peers:
-        elements.append(Paragraph("Direct Peers", section_style))
+        elements.append(Paragraph("Verified Peers", section_style))
 
         for peer in sorted(direct_peers, key=lambda p: p.get("name", "")):
-            peer_children = peer.get("children", [])
-            peer_transit = peer.get("transit_children", [])
+            all_kids = peer.get("children", [])
+            peer_downstream = [c for c in all_kids if c.get("category") == "Downstream"]
+            peer_transit = [c for c in all_kids if c.get("category") != "Downstream"]
 
             # Verification label
             verified = peer.get("verified", False)
@@ -904,12 +909,12 @@ def _build_routing_pdf(tree: dict, location: str) -> bytes:
             if shared_ix:
                 ix_detail = f" ({', '.join(shared_ix)})"
 
-            # Summary line: "3 Downstream, 12 Transit Reachable"
+            # Summary line
             counts = []
-            if peer_children:
-                counts.append(f"{len(peer_children)} downstream")
+            if peer_downstream:
+                counts.append(f"{len(peer_downstream)} downstream")
             if peer_transit:
-                counts.append(f"{len(peer_transit)} transit reachable")
+                counts.append(f"{len(peer_transit)} reachable transit")
             count_text = ", ".join(counts) if counts else "no downstream"
 
             rows = [[
@@ -932,9 +937,9 @@ def _build_routing_pdf(tree: dict, location: str) -> bytes:
             elements.append(t)
 
             # Downstream table under this peer
-            if peer_children:
+            if peer_downstream:
                 ds_rows = []
-                for ds in sorted(peer_children, key=lambda d: d.get("name", "")):
+                for ds in sorted(peer_downstream, key=lambda d: d.get("name", "")):
                     ds_rows.append([
                         Paragraph(f"AS{ds['asn']}", cell_mono),
                         Paragraph(ds.get("name", ""), cell_style),
@@ -955,10 +960,10 @@ def _build_routing_pdf(tree: dict, location: str) -> bytes:
                 ]))
                 elements.append(ds_table)
 
-            # Transit reachable table under this peer
+            # Reachable transit table under this peer
             if peer_transit:
                 tr_rows = []
-                for tr in sorted(peer_transit, key=lambda t: t.get("name", "")):
+                for tr in sorted(peer_transit, key=lambda t_node: t_node.get("name", "")):
                     tr_rows.append([
                         Paragraph(f"AS{tr['asn']}", cell_mono),
                         Paragraph(tr.get("name", ""), cell_style),
@@ -978,38 +983,6 @@ def _build_routing_pdf(tree: dict, location: str) -> bytes:
                     ("LEFTPADDING", (1, 0), (-1, -1), 6),
                 ]))
                 elements.append(tr_table)
-
-    # Unresolved section
-    if unresolved:
-        elements.append(Paragraph("Unresolved Networks", section_style))
-        t_rows = [
-            [
-                Paragraph("<b>ASN</b>", cell_bold),
-                Paragraph("<b>Name</b>", cell_bold),
-                Paragraph("<b>Type</b>", cell_bold),
-            ]
-        ]
-        for node in sorted(unresolved, key=lambda n: n.get("name", "")):
-            t_rows.append([
-                Paragraph(f"AS{node['asn']}", cell_mono),
-                Paragraph(node.get("name", ""), cell_style),
-                Paragraph(node.get("info_type", ""), cell_style),
-            ])
-        t_table = Table(t_rows, colWidths=[0.9 * inch, 3.5 * inch, 1.3 * inch])
-        t_table.setStyle(TableStyle([
-            ("BACKGROUND", (0, 0), (-1, 0), zl_navy),
-            ("TEXTCOLOR", (0, 0), (-1, 0), colors.white),
-            ("FONTNAME", (0, 0), (-1, 0), "Helvetica-Bold"),
-            ("FONTSIZE", (0, 0), (-1, 0), 9),
-            ("BACKGROUND", (0, 1), (-1, -1), light_blue),
-            ("BOX", (0, 0), (-1, -1), 0.5, colors.HexColor("#94a3b8")),
-            ("LINEBELOW", (0, 0), (-1, -2), 0.25, colors.HexColor("#cbd5e1")),
-            ("TOPPADDING", (0, 0), (-1, -1), 4),
-            ("BOTTOMPADDING", (0, 0), (-1, -1), 4),
-            ("LEFTPADDING", (0, 0), (-1, -1), 6),
-        ]))
-        elements.append(Spacer(1, 4))
-        elements.append(t_table)
 
     # Footer note
     elements.append(Spacer(1, 20))
