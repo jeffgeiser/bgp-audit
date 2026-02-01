@@ -35,7 +35,7 @@
         /* Sankey ribbon connectors */
         .ribbon { fill: none; stroke-linecap: round; }
         .ribbon-origin  { stroke: #86efac; stroke-width: 2.5; opacity: 0.55; }
-        .ribbon-downstream { stroke: #60a5fa; stroke-width: 1.8; opacity: 0.45; stroke-dasharray: 8 4; }
+        .ribbon-downstream { stroke: #60a5fa; stroke-width: 2; opacity: 0.5; }
         .ribbon-transit { stroke: #94a3b8; stroke-width: 1.2; opacity: 0.35; stroke-dasharray: 5 3; }
 
         /* Tooltip */
@@ -95,16 +95,16 @@
                 <span class="text-slate-600 font-medium">Zenlayer Origin</span>
                 <span class="w-3.5 h-3.5 rounded-full bg-slate-200 text-slate-500 text-[9px] font-bold flex items-center justify-center cursor-help">i</span>
                 <div class="hidden group-hover:block absolute left-0 top-full mt-1 z-50 w-56 bg-slate-800 text-white text-[11px] rounded-lg px-3 py-2 shadow-lg">
-                    Zenlayer's own AS numbers (AS21859 &amp; AS4229). The root of every routing path.
+                    Zenlayer Infrastructure (AS21859, AS4229). The starting point of the audit.
                 </div>
             </div>
             <!-- Verified Local Peer -->
             <div class="flex items-center gap-1.5 text-xs relative group">
-                <span class="w-3.5 h-3.5 rounded-sm border-2 bg-[#dcfce7] border-[#16a34a]"></span>
+                <span class="w-3.5 h-3.5 rounded-sm border-2 bg-[#fff7ed] border-[#16a34a]"></span>
                 <span class="text-slate-600 font-medium">Verified Local Peer</span>
                 <span class="w-3.5 h-3.5 rounded-full bg-slate-200 text-slate-500 text-[9px] font-bold flex items-center justify-center cursor-help">i</span>
                 <div class="hidden group-hover:block absolute left-0 top-full mt-1 z-50 w-64 bg-slate-800 text-white text-[11px] rounded-lg px-3 py-2 shadow-lg">
-                    Direct 1-hop BGP peer confirmed co-located at the same PeeringDB facility or sharing an Internet Exchange.
+                    Direct BGP adjacency confirmed via PeeringDB to be in the same facility.
                 </div>
             </div>
             <!-- Remote / Logical Peer -->
@@ -113,7 +113,7 @@
                 <span class="text-slate-600 font-medium">Remote / Logical Peer</span>
                 <span class="w-3.5 h-3.5 rounded-full bg-slate-200 text-slate-500 text-[9px] font-bold flex items-center justify-center cursor-help">i</span>
                 <div class="hidden group-hover:block absolute left-0 top-full mt-1 z-50 w-64 bg-slate-800 text-white text-[11px] rounded-lg px-3 py-2 shadow-lg">
-                    Direct 1-hop BGP peer observed via AS-path analysis but not confirmed at this facility via PeeringDB. Likely peering over a remote IX or tunnel.
+                    Discovered 1-hop BGP neighbor likely connected via a regional Internet Exchange (IXP).
                 </div>
             </div>
             <!-- Downstream -->
@@ -121,8 +121,8 @@
                 <span class="w-3.5 h-3.5 rounded-sm border-2 bg-[#dbeafe] border-[#3b82f6]"></span>
                 <span class="text-slate-600 font-medium">Downstream</span>
                 <span class="w-3.5 h-3.5 rounded-full bg-slate-200 text-slate-500 text-[9px] font-bold flex items-center justify-center cursor-help">i</span>
-                <div class="hidden group-hover:block absolute left-0 top-full mt-1 z-50 w-56 bg-slate-800 text-white text-[11px] rounded-lg px-3 py-2 shadow-lg">
-                    Network that routes through a direct peer to reach Zenlayer. Confirmed via AS-path analysis.
+                <div class="hidden group-hover:block absolute left-0 top-full mt-1 z-50 w-60 bg-slate-800 text-white text-[11px] rounded-lg px-3 py-2 shadow-lg">
+                    Verified customers of our direct peers. High-priority, direct-to-destination paths.
                 </div>
             </div>
             <!-- Reachable Transit -->
@@ -131,7 +131,7 @@
                 <span class="text-slate-600 font-medium">Reachable Transit</span>
                 <span class="w-3.5 h-3.5 rounded-full bg-slate-200 text-slate-500 text-[9px] font-bold flex items-center justify-center cursor-help">i</span>
                 <div class="hidden group-hover:block absolute left-0 top-full mt-1 z-50 w-60 bg-slate-800 text-white text-[11px] rounded-lg px-3 py-2 shadow-lg">
-                    Network present at the facility but with no direct path to Zenlayer. Reachable through a peer's transit network.
+                    General internet networks reachable through our peers.
                 </div>
             </div>
         </div>
@@ -165,7 +165,7 @@
 
                 <div class="ml-auto flex items-center gap-3" x-show="treeData">
                     <button @click="expandAll()" class="px-3 py-1.5 text-xs font-bold text-slate-600 bg-slate-100 rounded-lg hover:bg-slate-200 transition-colors">
-                        Expand All
+                        Expand All Downstreams
                     </button>
                     <button @click="collapseAll()" class="px-3 py-1.5 text-xs font-bold text-slate-600 bg-slate-100 rounded-lg hover:bg-slate-200 transition-colors">
                         Collapse All
@@ -236,7 +236,14 @@
             gRef: null,
             expandedPeers: {},   // {asn: true/false}
 
-            init() {},
+            init() {
+                const params = new URLSearchParams(window.location.search);
+                const city = params.get('city');
+                if (city) {
+                    this.selectedCity = city;
+                    this.$nextTick(() => this.loadRoutingFlow());
+                }
+            },
 
             async loadRoutingFlow() {
                 if (!this.selectedCity) return;
@@ -387,20 +394,41 @@
                     .style('fill', '#15803d').style('letter-spacing', '0.05em')
                     .text('ORIGIN');
 
-                // ---- Background: Peers + Children ----
+                // ---- Background: Peers column ----
                 if (peers.length > 0) {
                     const regionTop = padTop + 4;
                     const regionBot = curY - groupGap + boxH / 2 + 10;
-                    const regionW = hasCol2
-                        ? (col2x + boxW + 12) - (col1x - 12)
-                        : boxW + 24;
+                    const peerRegionH = Math.max(regionBot - regionTop, boxH + 36);
                     g.append('rect')
                         .attr('x', col1x - 12).attr('y', regionTop)
-                        .attr('width', regionW)
-                        .attr('height', Math.max(regionBot - regionTop, boxH + 36))
+                        .attr('width', boxW + 24)
+                        .attr('height', peerRegionH)
                         .attr('rx', 8)
-                        .attr('fill', '#fefce8').attr('stroke', '#fde68a').attr('stroke-width', 1)
-                        .attr('opacity', 0.45);
+                        .attr('fill', '#fff7ed').attr('stroke', '#fed7aa').attr('stroke-width', 1)
+                        .attr('opacity', 0.4);
+                    g.append('text')
+                        .attr('x', col1x + boxW / 2).attr('y', regionTop + 14)
+                        .attr('text-anchor', 'middle')
+                        .style('font-size', '10px').style('font-weight', '700')
+                        .style('fill', '#c2410c').style('letter-spacing', '0.05em')
+                        .text('PEERS');
+
+                    // ---- Background: Networks column ----
+                    if (hasCol2) {
+                        g.append('rect')
+                            .attr('x', col2x - 12).attr('y', regionTop)
+                            .attr('width', boxW + 24)
+                            .attr('height', peerRegionH)
+                            .attr('rx', 8)
+                            .attr('fill', '#eff6ff').attr('stroke', '#bfdbfe').attr('stroke-width', 1)
+                            .attr('opacity', 0.4);
+                        g.append('text')
+                            .attr('x', col2x + boxW / 2).attr('y', regionTop + 14)
+                            .attr('text-anchor', 'middle')
+                            .style('font-size', '10px').style('font-weight', '700')
+                            .style('fill', '#1d4ed8').style('letter-spacing', '0.05em')
+                            .text('NETWORKS');
+                    }
                 }
 
                 // ---- Helper: curved ribbon connector ----
@@ -512,7 +540,7 @@
                     const kids = peer.children || [];
                     const isOpen = self.expandedPeers[peer.asn];
 
-                    const peerFill = peer.verified ? '#dcfce7' : '#fff7ed';
+                    const peerFill = '#fff7ed';
                     const peerStroke = peer.verified ? '#16a34a' : '#ea580c';
                     const peerAnchors = drawBox(
                         col1x, row.y, peer,
