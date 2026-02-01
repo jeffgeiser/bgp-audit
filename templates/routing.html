@@ -12,27 +12,37 @@
         [x-cloak] { display: none !important; }
         body { font-family: 'Inter', sans-serif; }
 
-        .node circle {
-            cursor: pointer;
+        /* Box nodes */
+        .node-box { cursor: pointer; }
+        .node-box rect {
+            stroke-width: 2px;
+            rx: 4;
+            ry: 4;
+        }
+        .node-box .asn-label {
+            font-family: 'Courier New', Courier, monospace;
+            font-weight: 700;
+            font-size: 13px;
+            fill: #1e293b;
+        }
+        .node-box .name-label {
+            font-family: 'Inter', sans-serif;
+            font-size: 11px;
+            fill: #475569;
+        }
+
+        /* Orthogonal link paths */
+        .link-path {
+            fill: none;
+            stroke: #334155;
+            stroke-width: 1.5px;
+        }
+        .link-path-direct {
+            stroke: #334155;
             stroke-width: 2px;
         }
 
-        .node text {
-            font-size: 11px;
-            font-family: 'Inter', sans-serif;
-        }
-
-        .link {
-            fill: none;
-            stroke: #cbd5e1;
-            stroke-width: 1.5px;
-        }
-
-        .link-highlight {
-            stroke: #00A9E0;
-            stroke-width: 2.5px;
-        }
-
+        /* Tooltip */
         .tooltip {
             position: absolute;
             padding: 10px 14px;
@@ -43,18 +53,6 @@
             pointer-events: none;
             z-index: 1000;
             box-shadow: 0 4px 20px rgba(0,0,0,0.3);
-        }
-
-        .node-root circle { fill: #00205B; stroke: #00A9E0; }
-        .node-direct circle { fill: #f59e0b; stroke: #d97706; }
-        .node-peer circle { fill: #00A9E0; stroke: #00205B; }
-        .node-downstream circle { fill: #94a3b8; stroke: #64748b; }
-
-        .node-collapsed circle { fill-opacity: 0.6; }
-
-        .link-direct {
-            stroke: #f59e0b;
-            stroke-width: 2.5px;
         }
     </style>
 </head>
@@ -123,20 +121,20 @@
 
                 <div class="ml-auto flex items-center gap-4">
                     <div class="flex items-center gap-2 text-xs">
-                        <span class="w-3 h-3 rounded-full bg-[#00205B] border-2 border-[#00A9E0]"></span>
-                        <span class="text-slate-600">Zenlayer</span>
+                        <span class="w-3 h-3 rounded border-2 bg-[#dcfce7] border-[#16a34a]"></span>
+                        <span class="text-slate-600">Origin</span>
                     </div>
                     <div class="flex items-center gap-2 text-xs">
-                        <span class="w-3 h-3 rounded-full bg-amber-400 border-2 border-amber-600"></span>
+                        <span class="w-3 h-3 rounded border-2 bg-white border-[#2563eb]"></span>
                         <span class="text-slate-600">Direct Peer</span>
                     </div>
                     <div class="flex items-center gap-2 text-xs">
-                        <span class="w-3 h-3 rounded-full bg-[#00A9E0] border-2 border-[#00205B]"></span>
-                        <span class="text-slate-600">Transit</span>
+                        <span class="w-3 h-3 rounded border-2 bg-[#dbeafe] border-[#3b82f6]"></span>
+                        <span class="text-slate-600">Downstream</span>
                     </div>
                     <div class="flex items-center gap-2 text-xs">
-                        <span class="w-3 h-3 rounded-full bg-slate-400 border-2 border-slate-500"></span>
-                        <span class="text-slate-600">Downstream</span>
+                        <span class="w-3 h-3 rounded border-2 bg-[#f1f5f9] border-[#94a3b8]"></span>
+                        <span class="text-slate-600">Transit</span>
                     </div>
                 </div>
             </div>
@@ -166,25 +164,26 @@
                 <div>
                     <h2 class="font-bold text-slate-800" x-text="'Routing Flow: ' + selectedCity"></h2>
                     <p class="text-xs text-slate-500 mt-1">
-                        <span x-show="directPeerCount > 0" class="inline-flex items-center gap-1"><span class="w-2 h-2 rounded-full bg-amber-400 inline-block"></span> <span x-text="directPeerCount"></span> Direct Peers</span>
+                        <span x-show="directPeerCount > 0" class="inline-flex items-center gap-1"><span class="w-2 h-2 rounded bg-white border border-blue-600 inline-block"></span> <span x-text="directPeerCount"></span> Direct Peers</span>
                         <span x-show="directPeerCount > 0 && transitCount > 0"> &bull; </span>
-                        <span x-show="transitCount > 0" class="inline-flex items-center gap-1"><span class="w-2 h-2 rounded-full bg-[#00A9E0] inline-block"></span> <span x-text="transitCount"></span> Transit</span>
-                        <span x-show="downstreamCount > 0"> &bull; <span class="inline-flex items-center gap-1"><span class="w-2 h-2 rounded-full bg-slate-400 inline-block"></span> <span x-text="downstreamCount"></span> Downstream</span></span>
+                        <span x-show="transitCount > 0" class="inline-flex items-center gap-1"><span class="w-2 h-2 rounded bg-slate-100 border border-slate-400 inline-block"></span> <span x-text="transitCount"></span> Transit</span>
+                        <span x-show="downstreamCount > 0"> &bull; <span class="inline-flex items-center gap-1"><span class="w-2 h-2 rounded bg-blue-100 border border-blue-400 inline-block"></span> <span x-text="downstreamCount"></span> Downstream</span></span>
                     </p>
                 </div>
                 <div class="flex items-center gap-2">
                     <button @click="resetZoom()" class="px-3 py-1.5 text-xs font-bold text-slate-600 bg-slate-100 rounded-lg hover:bg-slate-200 transition-colors">
                         Reset View
                     </button>
-                    <button @click="expandAll()" class="px-3 py-1.5 text-xs font-bold text-slate-600 bg-slate-100 rounded-lg hover:bg-slate-200 transition-colors">
-                        Expand All
-                    </button>
-                    <button @click="collapseAll()" class="px-3 py-1.5 text-xs font-bold text-slate-600 bg-slate-100 rounded-lg hover:bg-slate-200 transition-colors">
-                        Collapse All
-                    </button>
+                    <a x-show="selectedCity && treeData"
+                       :href="'/audit/api/routing-flow/pdf?location=' + encodeURIComponent(selectedCity)"
+                       target="_blank"
+                       class="px-3 py-1.5 text-xs font-bold text-white bg-[#00205B] rounded-lg hover:bg-[#003087] transition-colors inline-flex items-center gap-1">
+                        <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 10v6m0 0l-3-3m3 3l3-3m2 8H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" /></svg>
+                        Export PDF
+                    </a>
                 </div>
             </div>
-            <div id="tree-container" class="w-full" style="height: 700px;"></div>
+            <div id="tree-container" class="w-full" style="min-height: 600px;"></div>
         </div>
 
         <div
@@ -199,8 +198,6 @@
     <div id="tooltip" class="tooltip" style="display: none;"></div>
 
     <script>
-        console.log('[Routing] Script loaded at', new Date().toISOString());
-
         function routingFlow() {
             return {
                 selectedCity: '',
@@ -212,19 +209,13 @@
                 transitCount: 0,
                 downstreamCount: 0,
                 svg: null,
-                root: null,
-                treemap: null,
                 zoom: null,
                 gRef: null,
 
-                init() {
-                    console.log('[Routing] Alpine component initialized');
-                },
+                init() {},
 
                 async loadRoutingFlow() {
-                    console.log('[Routing] loadRoutingFlow called', { city: this.selectedCity });
                     if (!this.selectedCity) return;
-
                     this.loading = true;
                     this.treeData = null;
 
@@ -238,262 +229,273 @@
                         this.directPeerCount = this.treeData.direct_peer_count || 0;
                         this.transitCount = this.treeData.transit_count || 0;
                         this.downstreamCount = this.treeData.downstream_count || 0;
-
                     } catch (err) {
                         console.error('Error loading routing flow:', err);
                     } finally {
                         this.loading = false;
-                        // Wait for DOM to update after loading=false, then render
                         await this.$nextTick();
-                        setTimeout(() => this.renderTree(), 50);
+                        setTimeout(() => this.renderDiagram(), 50);
                     }
                 },
 
-                renderTree() {
-                    try {
-                        console.log('[Routing] renderTree() called');
+                renderDiagram() {
+                    if (!this.treeData) return;
 
-                        const container = document.getElementById('tree-container');
-                        console.log('[Routing] Container:', container);
+                    const container = document.getElementById('tree-container');
+                    if (!container) return;
+                    d3.select('#tree-container').selectAll('*').remove();
 
-                        if (!container) {
-                            console.error('[Routing] Container not found!');
-                            return;
-                        }
+                    const data = this.treeData;
+                    const children = data.children || [];
 
-                        if (!this.treeData) {
-                            console.error('[Routing] No tree data!');
-                            return;
-                        }
+                    // Separate direct peers and transit
+                    const directPeers = children.filter(c => c.is_direct);
+                    const transit = children.filter(c => !c.is_direct);
 
-                        // Clear previous
-                        d3.select('#tree-container').selectAll('*').remove();
+                    // Collect all downstream nodes under direct peers
+                    const downstreamMap = {};
+                    directPeers.forEach(peer => {
+                        (peer.children || []).forEach(ds => {
+                            if (!downstreamMap[ds.asn]) {
+                                downstreamMap[ds.asn] = { ...ds, parents: [] };
+                            }
+                            downstreamMap[ds.asn].parents.push(peer.asn);
+                        });
+                    });
+                    const downstreamNodes = Object.values(downstreamMap);
 
-                        const width = container.clientWidth || container.offsetWidth || 1200;
-                        // Calculate height based on number of peers (min 700, scale with peers)
-                        const peerCount = this.treeData.children?.length || 0;
-                        const height = Math.max(700, peerCount * 25);
+                    // Layout constants
+                    const boxW = 150, boxH = 50;
+                    const colGap = 100;
+                    const rowGap = 12;
+                    const padTop = 60, padLeft = 40, padRight = 40, padBottom = 40;
 
-                        console.log('[Routing] Dimensions:', { width, height, peers: peerCount, containerWidth: container.clientWidth, offsetWidth: container.offsetWidth });
+                    // Column x positions
+                    const col0x = padLeft;
+                    const col1x = padLeft + boxW + colGap;
+                    const col2x = padLeft + (boxW + colGap) * 2;
 
-                    const margin = { top: 40, right: 250, bottom: 40, left: 150 };
+                    // Compute column heights
+                    const originCount = 1; // Single root node
+                    const col1Count = directPeers.length + transit.length;
+                    const col2Count = downstreamNodes.length;
+                    const maxRows = Math.max(originCount, col1Count, col2Count, 1);
 
-                    // Create SVG
-                    console.log('[Routing] Creating SVG');
+                    const svgHeight = padTop + maxRows * (boxH + rowGap) + padBottom;
+                    const svgWidth = col2Count > 0
+                        ? col2x + boxW + padRight
+                        : col1x + boxW + padRight;
+
+                    container.style.height = Math.max(600, svgHeight) + 'px';
+
                     this.svg = d3.select('#tree-container')
                         .append('svg')
-                        .attr('width', width)
-                        .attr('height', height)
-                        .style('background', '#fafafa');
+                        .attr('width', '100%')
+                        .attr('height', Math.max(600, svgHeight))
+                        .attr('viewBox', `0 0 ${svgWidth} ${Math.max(600, svgHeight)}`)
+                        .style('background', '#ffffff');
 
-                    // Create group first (before zoom references it)
-                    this.gRef = this.svg.append('g')
-                        .attr('transform', `translate(${margin.left},${margin.top})`);
+                    this.gRef = this.svg.append('g');
 
-                    // Now setup zoom
-                    const gRef = this.gRef; // Local reference for closure
+                    const gRef = this.gRef;
                     this.zoom = d3.zoom()
-                        .scaleExtent([0.2, 3])
-                        .on('zoom', (event) => {
-                            gRef.attr('transform', event.transform);
-                        });
-
+                        .scaleExtent([0.3, 3])
+                        .on('zoom', (event) => gRef.attr('transform', event.transform));
                     this.svg.call(this.zoom);
-                    console.log('[Routing] SVG created, gRef:', this.gRef);
 
-                    // Add a test text to verify SVG is visible
-                    this.svg.append('text')
-                        .attr('x', 20)
-                        .attr('y', 30)
-                        .style('font-size', '14px')
-                        .style('fill', 'red')
-                        .text('SVG Rendering Test - If you see this, D3 is working!');
-
-                    // Create tree layout - swap dimensions for horizontal tree
-                    const innerWidth = width - margin.left - margin.right;
-                    const innerHeight = height - margin.top - margin.bottom;
-
-                    this.treemap = d3.tree().size([innerHeight, innerWidth]);
-
-                    // Create hierarchy
-                    this.root = d3.hierarchy(this.treeData, d => d.children);
-                    this.root.x0 = innerHeight / 2;
-                    this.root.y0 = 0;
-
-                    // Initially collapse peers with many children
-                    if (this.root.children) {
-                        this.root.children.forEach(child => {
-                            if (child.children && child.children.length > 5) {
-                                child._children = child.children;
-                                child.children = null;
-                            }
-                        });
-                    }
-
-                    console.log('[Routing] Root hierarchy created', {
-                        rootChildren: this.root.children?.length,
-                        x0: this.root.x0,
-                        y0: this.root.y0
-                    });
-
-                    this.updateTree(this.root);
-                    console.log('[Routing] renderTree() completed successfully');
-                    } catch (err) {
-                        console.error('[Routing] Error in renderTree:', err);
-                    }
-                },
-
-                updateTree(source) {
-                    const duration = 300;
-                    const that = this;
                     const g = this.gRef;
 
-                    // Compute the new tree layout
-                    const treeData = this.treemap(this.root);
-                    const nodes = treeData.descendants();
-                    const links = treeData.descendants().slice(1);
-
-                    console.log('[Routing] Update called', { nodes: nodes.length, links: links.length });
-
-                    // Normalize for fixed-depth (spread out horizontally)
-                    nodes.forEach(d => { d.y = d.depth * 350; });
-
-                    // ---- LINKS ----
-                    const link = g.selectAll('path.link')
-                        .data(links, d => d.id || (d.id = Math.random()));
-
-                    // Enter links
-                    const linkEnter = link.enter().insert('path', 'g')
-                        .attr('class', d => {
-                            if (d.data.is_direct && d.depth === 1) return 'link link-direct';
-                            return 'link';
-                        })
-                        .attr('d', d => {
-                            const o = { x: source.x0 || 0, y: source.y0 || 0 };
-                            return this.diagonal(o, o);
-                        });
-
-                    // Update links
-                    linkEnter.merge(link)
-                        .transition()
-                        .duration(duration)
-                        .attr('d', d => this.diagonal(d, d.parent));
-
-                    // Remove old links
-                    link.exit()
-                        .transition()
-                        .duration(duration)
-                        .attr('d', d => {
-                            const o = { x: source.x, y: source.y };
-                            return this.diagonal(o, o);
-                        })
-                        .remove();
-
-                    // ---- NODES ----
-                    const node = g.selectAll('g.node')
-                        .data(nodes, d => d.id || (d.id = Math.random()));
-
-                    // Enter nodes
-                    const nodeEnter = node.enter().append('g')
-                        .attr('class', d => {
-                            if (d.depth === 0) return 'node node-root';
-                            if (d.depth === 1 && d.data.is_direct) return 'node node-direct';
-                            if (d.depth === 1) return 'node node-peer';
-                            return 'node node-downstream';
-                        })
-                        .attr('transform', d => `translate(${source.y0 || 0},${source.x0 || 0})`)
-                        .style('cursor', 'pointer')
-                        .on('click', (event, d) => {
-                            event.stopPropagation();
-                            if (d.children) {
-                                d._children = d.children;
-                                d.children = null;
-                            } else if (d._children) {
-                                d.children = d._children;
-                                d._children = null;
-                            }
-                            that.updateTree(d);
-                        })
-                        .on('mouseover', (event, d) => {
-                            const tooltip = document.getElementById('tooltip');
-                            let content = `<strong>${d.data.name || 'Unknown'}</strong>`;
-                            if (d.data.asn) content += `<br>ASN: ${d.data.asn}`;
-                            if (d.data.is_direct) content += `<br><span style="color:#fbbf24">&#9733; Direct Peer</span>`;
-                            else if (d.data.category === 'Transit') content += `<br>Transit`;
-                            if (d.data.info_type) content += `<br>Type: ${d.data.info_type}`;
-                            if (d.data.irr_as_set) content += `<br>AS-SET: ${d.data.irr_as_set}`;
-                            const childCount = (d.children?.length || 0) + (d._children?.length || 0);
-                            if (childCount > 0) content += `<br>Children: ${childCount}`;
-                            tooltip.innerHTML = content;
-                            tooltip.style.display = 'block';
-                            tooltip.style.left = (event.pageX + 15) + 'px';
-                            tooltip.style.top = (event.pageY - 10) + 'px';
-                        })
-                        .on('mouseout', () => {
-                            document.getElementById('tooltip').style.display = 'none';
-                        });
-
-                    // Add circles
-                    nodeEnter.append('circle')
-                        .attr('r', d => {
-                            if (d.depth === 0) return 14;
-                            if (d.depth === 1 && d.data.is_direct) return 11;
-                            if (d.depth === 1) return 9;
-                            return 6;
-                        })
-                        .style('stroke-width', '2px');
-
-                    // Add labels
-                    nodeEnter.append('text')
-                        .attr('dy', '.35em')
-                        .attr('x', d => (d.children || d._children) ? -18 : 18)
-                        .attr('text-anchor', d => (d.children || d._children) ? 'end' : 'start')
-                        .style('font-size', d => d.depth === 0 ? '13px' : '11px')
-                        .style('font-weight', d => (d.depth <= 1 || d.data.is_direct) ? '600' : '400')
-                        .style('fill', d => d.data.is_direct ? '#92400e' : '#1e293b')
-                        .text(d => {
-                            const name = d.data.name || `AS${d.data.asn}`;
-                            return name.length > 42 ? name.substring(0, 40) + '...' : name;
-                        });
-
-                    // Add child count indicator
-                    nodeEnter.filter(d => d._children && d._children.length > 0)
-                        .append('text')
-                        .attr('dy', '.35em')
-                        .attr('x', 18)
-                        .style('font-size', '10px')
-                        .style('fill', '#64748b')
-                        .text(d => `(+${d._children.length})`);
-
-                    // Update: transition nodes to new position
-                    const nodeUpdate = nodeEnter.merge(node);
-
-                    nodeUpdate.transition()
-                        .duration(duration)
-                        .attr('transform', d => `translate(${d.y},${d.x})`);
-
-                    nodeUpdate.select('circle')
-                        .style('fill', d => d._children ? '#e2e8f0' : null);
-
-                    // Remove old nodes
-                    node.exit()
-                        .transition()
-                        .duration(duration)
-                        .attr('transform', d => `translate(${source.y},${source.x})`)
-                        .remove();
-
-                    // Store positions for next transition
-                    nodes.forEach(d => {
-                        d.x0 = d.x;
-                        d.y0 = d.y;
+                    // Timestamp
+                    const now = new Date();
+                    const ts = now.toLocaleString('en-GB', {
+                        day: '2-digit', month: 'short', year: '2-digit',
+                        hour: '2-digit', minute: '2-digit', timeZoneName: 'short'
                     });
-                },
+                    g.append('text')
+                        .attr('x', padLeft)
+                        .attr('y', 25)
+                        .style('font-family', "'Courier New', monospace")
+                        .style('font-size', '13px')
+                        .style('fill', '#334155')
+                        .text(ts);
 
-                diagonal(s, d) {
-                    return `M ${s.y} ${s.x}
-                            C ${(s.y + d.y) / 2} ${s.x},
-                              ${(s.y + d.y) / 2} ${d.x},
-                              ${d.y} ${d.x}`;
+                    // Background regions
+                    // Origins region (green)
+                    const origRegionH = boxH + 40;
+                    const origRegionY = padTop - 10;
+                    g.append('rect')
+                        .attr('x', col0x - 15)
+                        .attr('y', origRegionY)
+                        .attr('width', boxW + 30)
+                        .attr('height', origRegionH)
+                        .attr('rx', 8)
+                        .attr('fill', '#dcfce7')
+                        .attr('stroke', '#86efac')
+                        .attr('stroke-width', 1);
+                    g.append('text')
+                        .attr('x', col0x + boxW / 2)
+                        .attr('y', origRegionY + 16)
+                        .attr('text-anchor', 'middle')
+                        .style('font-size', '11px')
+                        .style('font-weight', '600')
+                        .style('fill', '#15803d')
+                        .text('Origins');
+
+                    // Peers region (blue)
+                    const peerRegionH = Math.max(col1Count, 1) * (boxH + rowGap) + 30;
+                    g.append('rect')
+                        .attr('x', col1x - 15)
+                        .attr('y', padTop - 10)
+                        .attr('width', (col2Count > 0 ? (col2x + boxW + 15) - (col1x - 15) : boxW + 30))
+                        .attr('height', Math.max(peerRegionH, origRegionH))
+                        .attr('rx', 8)
+                        .attr('fill', '#eff6ff')
+                        .attr('stroke', '#bfdbfe')
+                        .attr('stroke-width', 1);
+
+                    // Section labels
+                    if (directPeers.length > 0) {
+                        g.append('text')
+                            .attr('x', col1x + boxW / 2)
+                            .attr('y', padTop + 6)
+                            .attr('text-anchor', 'middle')
+                            .style('font-size', '11px')
+                            .style('font-weight', '600')
+                            .style('fill', '#1d4ed8')
+                            .text('Direct Peers');
+                    }
+                    if (col2Count > 0) {
+                        g.append('text')
+                            .attr('x', col2x + boxW / 2)
+                            .attr('y', padTop + 6)
+                            .attr('text-anchor', 'middle')
+                            .style('font-size', '11px')
+                            .style('font-weight', '600')
+                            .style('fill', '#1d4ed8')
+                            .text('Downstream');
+                    }
+
+                    // Helper: draw a box node
+                    const drawBox = (x, y, asn, name, fill, stroke) => {
+                        const group = g.append('g')
+                            .attr('class', 'node-box')
+                            .attr('transform', `translate(${x},${y})`);
+                        group.append('rect')
+                            .attr('width', boxW)
+                            .attr('height', boxH)
+                            .attr('fill', fill)
+                            .attr('stroke', stroke);
+                        group.append('text')
+                            .attr('class', 'asn-label')
+                            .attr('x', boxW / 2)
+                            .attr('y', 20)
+                            .attr('text-anchor', 'middle')
+                            .text(`AS${asn}`);
+                        const displayName = (name || '').length > 18
+                            ? name.substring(0, 16) + '...'
+                            : (name || `AS${asn}`);
+                        group.append('text')
+                            .attr('class', 'name-label')
+                            .attr('x', boxW / 2)
+                            .attr('y', 37)
+                            .attr('text-anchor', 'middle')
+                            .text(displayName);
+
+                        // Tooltip
+                        group.on('mouseover', (event) => {
+                                const tooltip = document.getElementById('tooltip');
+                                let content = `<strong>${name || 'AS' + asn}</strong>`;
+                                content += `<br>ASN: ${asn}`;
+                                tooltip.innerHTML = content;
+                                tooltip.style.display = 'block';
+                                tooltip.style.left = (event.pageX + 15) + 'px';
+                                tooltip.style.top = (event.pageY - 10) + 'px';
+                            })
+                            .on('mouseout', () => {
+                                document.getElementById('tooltip').style.display = 'none';
+                            });
+
+                        return { cx: x + boxW, cy: y + boxH / 2, lx: x, ly: y + boxH / 2 };
+                    };
+
+                    // Helper: orthogonal connector
+                    const drawLink = (x1, y1, x2, y2, cssClass) => {
+                        const midX = (x1 + x2) / 2;
+                        g.append('path')
+                            .attr('class', cssClass || 'link-path')
+                            .attr('d', `M${x1},${y1} H${midX} V${y2} H${x2}`)
+                            .attr('marker-end', 'url(#arrowhead)');
+                    };
+
+                    // Arrowhead marker
+                    this.svg.append('defs').append('marker')
+                        .attr('id', 'arrowhead')
+                        .attr('viewBox', '0 0 10 10')
+                        .attr('refX', 9)
+                        .attr('refY', 5)
+                        .attr('markerWidth', 6)
+                        .attr('markerHeight', 6)
+                        .attr('orient', 'auto')
+                        .append('path')
+                        .attr('d', 'M 0 0 L 10 5 L 0 10 z')
+                        .attr('fill', '#334155');
+
+                    // Position origin at vertical center of col1
+                    const col1TotalH = col1Count * (boxH + rowGap) - rowGap;
+                    const originY = padTop + 20 + Math.max(0, col1TotalH / 2 - boxH / 2);
+
+                    const origin = drawBox(
+                        col0x, originY,
+                        data.asn, data.name.split('(')[0].trim(),
+                        '#dcfce7', '#16a34a'
+                    );
+
+                    // Draw Direct Peers in col1 (top section)
+                    const peerAnchors = {};
+                    const col1StartY = padTop + 20;
+
+                    directPeers.forEach((peer, i) => {
+                        const y = col1StartY + i * (boxH + rowGap);
+                        const anchors = drawBox(
+                            col1x, y, peer.asn, peer.name,
+                            '#ffffff', '#2563eb'
+                        );
+                        peerAnchors[peer.asn] = anchors;
+                        drawLink(origin.cx, origin.cy, anchors.lx, anchors.ly, 'link-path-direct');
+                    });
+
+                    // Draw Transit nodes in col1 (below direct peers)
+                    const transitStartIdx = directPeers.length;
+                    transit.forEach((node, i) => {
+                        const y = col1StartY + (transitStartIdx + i) * (boxH + rowGap);
+                        const anchors = drawBox(
+                            col1x, y, node.asn, node.name,
+                            '#f1f5f9', '#94a3b8'
+                        );
+                        drawLink(origin.cx, origin.cy, anchors.lx, anchors.ly, 'link-path');
+                    });
+
+                    // Draw Downstream nodes in col2
+                    if (downstreamNodes.length > 0) {
+                        // Center col2 vertically relative to col1 peers
+                        const col2StartY = padTop + 20;
+                        downstreamNodes.sort((a, b) => (a.name || '').localeCompare(b.name || ''));
+
+                        downstreamNodes.forEach((ds, i) => {
+                            const y = col2StartY + i * (boxH + rowGap);
+                            const anchors = drawBox(
+                                col2x, y, ds.asn, ds.name,
+                                '#dbeafe', '#3b82f6'
+                            );
+                            // Draw links from each parent peer to this downstream
+                            (ds.parents || []).forEach(parentAsn => {
+                                const pa = peerAnchors[parentAsn];
+                                if (pa) {
+                                    drawLink(pa.cx, pa.cy, anchors.lx, anchors.ly, 'link-path');
+                                }
+                            });
+                        });
+                    }
                 },
 
                 resetZoom() {
@@ -503,34 +505,6 @@
                             d3.zoomIdentity
                         );
                     }
-                },
-
-                expandAll() {
-                    if (!this.root) return;
-                    const expand = (d) => {
-                        if (d._children) {
-                            d.children = d._children;
-                            d._children = null;
-                        }
-                        if (d.children) d.children.forEach(expand);
-                    };
-                    expand(this.root);
-                    this.updateTree(this.root);
-                },
-
-                collapseAll() {
-                    if (!this.root) return;
-                    const collapse = (d) => {
-                        if (d.children && d.depth > 0) {
-                            d._children = d.children;
-                            d.children = null;
-                        }
-                        if (d._children) d._children.forEach(collapse);
-                    };
-                    if (this.root.children) {
-                        this.root.children.forEach(collapse);
-                    }
-                    this.updateTree(this.root);
                 }
             };
         }
