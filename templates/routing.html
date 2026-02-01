@@ -14,39 +14,28 @@
 
         /* Box nodes */
         .node-box { cursor: pointer; }
-        .node-box rect {
-            stroke-width: 2px;
-            rx: 4;
-            ry: 4;
-        }
+        .node-box rect { rx: 6; ry: 6; }
         .node-box .asn-label {
             font-family: 'Courier New', Courier, monospace;
             font-weight: 700;
-            font-size: 13px;
+            font-size: 12px;
             fill: #1e293b;
         }
         .node-box .name-label {
             font-family: 'Inter', sans-serif;
-            font-size: 11px;
+            font-size: 10px;
             fill: #475569;
         }
+        .node-box .count-label {
+            font-family: 'Inter', sans-serif;
+            font-size: 9px;
+            fill: #94a3b8;
+        }
 
-        /* Orthogonal link paths */
-        .link-path {
-            fill: none;
-            stroke: #334155;
-            stroke-width: 1.5px;
-        }
-        .link-path-direct {
-            stroke: #334155;
-            stroke-width: 2px;
-        }
-        .link-path-transit {
-            fill: none;
-            stroke: #94a3b8;
-            stroke-width: 1px;
-            stroke-dasharray: 4 3;
-        }
+        /* Sankey ribbon connectors */
+        .ribbon { fill: none; stroke-linecap: round; }
+        .ribbon-origin  { stroke: #86efac; stroke-width: 2.5; opacity: 0.55; }
+        .ribbon-transit { stroke: #94a3b8; stroke-width: 1.2; opacity: 0.35; stroke-dasharray: 5 3; }
 
         /* Tooltip */
         .tooltip {
@@ -59,6 +48,16 @@
             pointer-events: none;
             z-index: 1000;
             box-shadow: 0 4px 20px rgba(0,0,0,0.3);
+            max-width: 300px;
+        }
+
+        /* Expand / collapse caret */
+        .caret {
+            font-size: 10px;
+            fill: #94a3b8;
+            cursor: pointer;
+            dominant-baseline: central;
+            user-select: none;
         }
     </style>
 </head>
@@ -85,9 +84,31 @@
         </div>
     </header>
 
+    <!-- Legend Bar -->
+    <div class="bg-white border-b border-slate-200">
+        <div class="max-w-7xl mx-auto px-6 py-2.5 flex items-center gap-6">
+            <span class="text-[10px] font-bold text-slate-400 uppercase tracking-widest">Legend</span>
+            <div class="flex items-center gap-1.5 text-xs">
+                <span class="w-3.5 h-3.5 rounded-sm border-2 bg-[#dcfce7] border-[#16a34a]"></span>
+                <span class="text-slate-600 font-medium">Origin</span>
+                <span class="text-slate-400 ml-0.5">Zenlayer Infrastructure (AS21859, AS4229)</span>
+            </div>
+            <div class="flex items-center gap-1.5 text-xs">
+                <span class="w-3.5 h-3.5 rounded-sm border-2 bg-[#fff7ed] border-[#ea580c]"></span>
+                <span class="text-slate-600 font-medium">Verified Peer</span>
+                <span class="text-slate-400 ml-0.5">Direct 1-hop BGP adjacency via path analysis</span>
+            </div>
+            <div class="flex items-center gap-1.5 text-xs">
+                <span class="w-3.5 h-3.5 rounded-sm border-2 bg-[#f1f5f9] border-[#94a3b8]"></span>
+                <span class="text-slate-600 font-medium">Reachable Transit</span>
+                <span class="text-slate-400 ml-0.5">Networks reachable through our verified peers</span>
+            </div>
+        </div>
+    </div>
+
     <!-- Controls -->
     <div class="bg-white border-b border-slate-200 shadow-sm">
-        <div class="max-w-7xl mx-auto px-6 py-4">
+        <div class="max-w-7xl mx-auto px-6 py-3">
             <div class="flex flex-wrap items-center gap-4">
                 <div class="flex items-center gap-2">
                     <label class="text-xs font-bold text-slate-500 uppercase tracking-wider">Market</label>
@@ -110,38 +131,8 @@
                         class="relative w-12 h-6 rounded-full transition-colors"
                         :class="expandSets ? 'bg-[#00A9E0]' : 'bg-slate-300'"
                     >
-                        <span
-                            class="absolute top-1 w-4 h-4 bg-white rounded-full shadow transition-transform"
-                            :class="expandSets ? 'left-7' : 'left-1'"
-                        ></span>
-                    </button>
-                </div>
-
-                <div class="flex items-center gap-2" x-show="treeData && transitNestedCount > 0">
-                    <label class="text-xs font-bold text-slate-500 uppercase tracking-wider">Transit</label>
-                    <button
-                        @click="showTransit = !showTransit; renderDiagram()"
-                        class="relative w-12 h-6 rounded-full transition-colors"
-                        :class="showTransit ? 'bg-[#00A9E0]' : 'bg-slate-300'"
-                    >
-                        <span
-                            class="absolute top-1 w-4 h-4 bg-white rounded-full shadow transition-transform"
-                            :class="showTransit ? 'left-7' : 'left-1'"
-                        ></span>
-                    </button>
-                </div>
-
-                <div class="flex items-center gap-2" x-show="treeData && unresolvedCount > 0">
-                    <label class="text-xs font-bold text-slate-500 uppercase tracking-wider">Unresolved</label>
-                    <button
-                        @click="showUnresolved = !showUnresolved; renderDiagram()"
-                        class="relative w-12 h-6 rounded-full transition-colors"
-                        :class="showUnresolved ? 'bg-[#00A9E0]' : 'bg-slate-300'"
-                    >
-                        <span
-                            class="absolute top-1 w-4 h-4 bg-white rounded-full shadow transition-transform"
-                            :class="showUnresolved ? 'left-7' : 'left-1'"
-                        ></span>
+                        <span class="absolute top-1 w-4 h-4 bg-white rounded-full shadow transition-transform"
+                              :class="expandSets ? 'left-7' : 'left-1'"></span>
                     </button>
                 </div>
 
@@ -153,27 +144,22 @@
                     <span class="text-xs font-medium">Loading hierarchy...</span>
                 </div>
 
-                <div class="ml-auto flex items-center gap-4">
-                    <div class="flex items-center gap-2 text-xs">
-                        <span class="w-3 h-3 rounded border-2 bg-[#dcfce7] border-[#16a34a]"></span>
-                        <span class="text-slate-600">Origin</span>
-                    </div>
-                    <div class="flex items-center gap-2 text-xs">
-                        <span class="w-3 h-3 rounded border-l-4 border-[#16a34a] bg-white border-2"></span>
-                        <span class="text-slate-600">Verified Peer</span>
-                    </div>
-                    <div class="flex items-center gap-2 text-xs">
-                        <span class="w-3 h-3 rounded border-2 bg-white border-[#94a3b8]"></span>
-                        <span class="text-slate-600">External Peer</span>
-                    </div>
-                    <div class="flex items-center gap-2 text-xs">
-                        <span class="w-3 h-3 rounded border-2 bg-[#dbeafe] border-[#3b82f6]"></span>
-                        <span class="text-slate-600">Downstream</span>
-                    </div>
-                    <div class="flex items-center gap-2 text-xs">
-                        <span class="w-3 h-3 rounded border-2 bg-[#f1f5f9] border-[#94a3b8] border-dashed"></span>
-                        <span class="text-slate-600">Transit</span>
-                    </div>
+                <div class="ml-auto flex items-center gap-3" x-show="treeData">
+                    <button @click="expandAll()" class="px-3 py-1.5 text-xs font-bold text-slate-600 bg-slate-100 rounded-lg hover:bg-slate-200 transition-colors">
+                        Expand All
+                    </button>
+                    <button @click="collapseAll()" class="px-3 py-1.5 text-xs font-bold text-slate-600 bg-slate-100 rounded-lg hover:bg-slate-200 transition-colors">
+                        Collapse All
+                    </button>
+                    <button @click="resetZoom()" class="px-3 py-1.5 text-xs font-bold text-slate-600 bg-slate-100 rounded-lg hover:bg-slate-200 transition-colors">
+                        Reset View
+                    </button>
+                    <a :href="'/audit/api/routing-flow/pdf?location=' + encodeURIComponent(selectedCity)"
+                       target="_blank"
+                       class="px-3 py-1.5 text-xs font-bold text-white bg-[#00205B] rounded-lg hover:bg-[#003087] transition-colors inline-flex items-center gap-1">
+                        <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 10v6m0 0l-3-3m3 3l3-3m2 8H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" /></svg>
+                        Export PDF
+                    </a>
                 </div>
             </div>
         </div>
@@ -181,10 +167,8 @@
 
     <!-- Visualization Container -->
     <main class="max-w-7xl mx-auto px-6 py-8">
-        <div
-            x-show="!selectedCity"
-            class="bg-white rounded-2xl border border-slate-200 shadow-sm p-20 text-center"
-        >
+        <div x-show="!selectedCity"
+             class="bg-white rounded-2xl border border-slate-200 shadow-sm p-20 text-center">
             <div class="w-16 h-16 bg-slate-100 rounded-2xl flex items-center justify-center mx-auto mb-6">
                 <svg class="w-8 h-8 text-slate-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                     <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 20l-5.447-2.724A1 1 0 013 16.382V5.618a1 1 0 011.447-.894L9 7m0 13l6-3m-6 3V7m6 10l4.553 2.276A1 1 0 0021 18.382V7.618a1 1 0 00-.553-.894L15 4m0 13V4m0 0L9 7" />
@@ -194,41 +178,24 @@
             <p class="text-sm text-slate-500 mt-2">Choose a market from the dropdown to visualize the routing hierarchy.</p>
         </div>
 
-        <div
-            x-show="selectedCity && !loading && treeData"
-            class="bg-white rounded-2xl border border-slate-200 shadow-sm overflow-hidden"
-        >
+        <div x-show="selectedCity && !loading && treeData"
+             class="bg-white rounded-2xl border border-slate-200 shadow-sm overflow-hidden">
             <div class="border-b border-slate-100 px-6 py-4 flex items-center justify-between">
                 <div>
                     <h2 class="font-bold text-slate-800" x-text="'Routing Flow: ' + selectedCity"></h2>
                     <p class="text-xs text-slate-500 mt-1">
-                        <span x-show="directPeerCount > 0" class="inline-flex items-center gap-1"><span class="w-2 h-2 rounded bg-white border border-green-600 inline-block"></span> <span x-text="directPeerCount"></span> Direct Peers</span>
-                        <span x-show="directPeerCount > 0 && downstreamCount > 0"> &bull; </span>
-                        <span x-show="downstreamCount > 0" class="inline-flex items-center gap-1"><span class="w-2 h-2 rounded bg-blue-100 border border-blue-400 inline-block"></span> <span x-text="downstreamCount"></span> Downstream</span>
-                        <span x-show="transitNestedCount > 0"> &bull; <span class="inline-flex items-center gap-1"><span class="w-2 h-2 rounded bg-slate-100 border border-slate-400 inline-block"></span> <span x-text="transitNestedCount"></span> Transit Reachable</span></span>
-                        <span x-show="unresolvedCount > 0"> &bull; <span class="inline-flex items-center gap-1 text-slate-400"><span x-text="unresolvedCount"></span> Unresolved</span></span>
+                        <span x-text="directPeerCount + ' Verified Peers'"></span>
+                        <span x-show="downstreamCount > 0"> &bull; <span x-text="downstreamCount + ' Downstream'"></span></span>
+                        <span x-show="transitNestedCount > 0"> &bull; <span x-text="transitNestedCount + ' Reachable Transit'"></span></span>
+                        &mdash; <span class="text-slate-400">Click a peer to expand/collapse</span>
                     </p>
-                </div>
-                <div class="flex items-center gap-2">
-                    <button @click="resetZoom()" class="px-3 py-1.5 text-xs font-bold text-slate-600 bg-slate-100 rounded-lg hover:bg-slate-200 transition-colors">
-                        Reset View
-                    </button>
-                    <a x-show="selectedCity && treeData"
-                       :href="'/audit/api/routing-flow/pdf?location=' + encodeURIComponent(selectedCity)"
-                       target="_blank"
-                       class="px-3 py-1.5 text-xs font-bold text-white bg-[#00205B] rounded-lg hover:bg-[#003087] transition-colors inline-flex items-center gap-1">
-                        <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 10v6m0 0l-3-3m3 3l3-3m2 8H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" /></svg>
-                        Export PDF
-                    </a>
                 </div>
             </div>
             <div id="tree-container" class="w-full" style="min-height: 600px;"></div>
         </div>
 
-        <div
-            x-show="selectedCity && !loading && !treeData"
-            class="bg-white rounded-2xl border border-slate-200 shadow-sm p-12 text-center"
-        >
+        <div x-show="selectedCity && !loading && !treeData"
+             class="bg-white rounded-2xl border border-slate-200 shadow-sm p-12 text-center">
             <p class="text-slate-500">No routing data available for this market.</p>
         </div>
     </main>
@@ -237,360 +204,344 @@
     <div id="tooltip" class="tooltip" style="display: none;"></div>
 
     <script>
-        function routingFlow() {
-            return {
-                selectedCity: '',
-                expandSets: false,
-                showTransit: false,
-                showUnresolved: false,
-                loading: false,
-                treeData: null,
-                directPeerCount: 0,
-                downstreamCount: 0,
-                transitNestedCount: 0,
-                unresolvedCount: 0,
-                svg: null,
-                zoom: null,
-                gRef: null,
+    function routingFlow() {
+        return {
+            selectedCity: '',
+            expandSets: false,
+            loading: false,
+            treeData: null,
+            directPeerCount: 0,
+            downstreamCount: 0,
+            transitNestedCount: 0,
+            svg: null,
+            zoom: null,
+            gRef: null,
+            expandedPeers: {},   // {asn: true/false}
 
-                init() {},
+            init() {},
 
-                async loadRoutingFlow() {
-                    if (!this.selectedCity) return;
-                    this.loading = true;
-                    this.treeData = null;
+            async loadRoutingFlow() {
+                if (!this.selectedCity) return;
+                this.loading = true;
+                this.treeData = null;
+                this.expandedPeers = {};
 
-                    try {
-                        const url = `/audit/api/routing-flow?location=${encodeURIComponent(this.selectedCity)}&expand_sets=${this.expandSets}`;
-                        const response = await fetch(url);
-                        if (!response.ok) throw new Error('Failed to load routing data');
+                try {
+                    const url = `/audit/api/routing-flow?location=${encodeURIComponent(this.selectedCity)}&expand_sets=${this.expandSets}`;
+                    const resp = await fetch(url);
+                    if (!resp.ok) throw new Error('Failed to load');
+                    this.treeData = await resp.json();
+                    this.directPeerCount = this.treeData.direct_peer_count || 0;
+                    this.downstreamCount = this.treeData.downstream_count || 0;
+                    this.transitNestedCount = this.treeData.transit_nested_count || 0;
+                    // All peers collapsed by default
+                    (this.treeData.children || []).forEach(p => { this.expandedPeers[p.asn] = false; });
+                } catch (err) {
+                    console.error('Error loading routing flow:', err);
+                } finally {
+                    this.loading = false;
+                    await this.$nextTick();
+                    setTimeout(() => this.renderDiagram(), 50);
+                }
+            },
 
-                        this.treeData = await response.json();
-                        this.directPeerCount = this.treeData.direct_peer_count || 0;
-                        this.downstreamCount = this.treeData.downstream_count || 0;
-                        this.transitNestedCount = this.treeData.transit_nested_count || 0;
-                        this.unresolvedCount = this.treeData.unresolved_count || 0;
-                    } catch (err) {
-                        console.error('Error loading routing flow:', err);
-                    } finally {
-                        this.loading = false;
-                        await this.$nextTick();
-                        setTimeout(() => this.renderDiagram(), 50);
-                    }
-                },
+            togglePeer(asn) {
+                this.expandedPeers[asn] = !this.expandedPeers[asn];
+                this.renderDiagram();
+            },
 
-                renderDiagram() {
-                    if (!this.treeData) return;
+            expandAll() {
+                Object.keys(this.expandedPeers).forEach(k => { this.expandedPeers[k] = true; });
+                this.renderDiagram();
+            },
 
-                    const container = document.getElementById('tree-container');
-                    if (!container) return;
-                    d3.select('#tree-container').selectAll('*').remove();
+            collapseAll() {
+                Object.keys(this.expandedPeers).forEach(k => { this.expandedPeers[k] = false; });
+                this.renderDiagram();
+            },
 
-                    const data = this.treeData;
-                    const peers = data.children || [];
-                    const unresolvedNodes = this.showUnresolved ? (data.unresolved || []) : [];
+            renderDiagram() {
+                if (!this.treeData) return;
+                const container = document.getElementById('tree-container');
+                if (!container) return;
+                d3.select('#tree-container').selectAll('*').remove();
 
-                    // Layout constants
-                    const boxW = 170, boxH = 50;
-                    const colGap = 90;
-                    const rowGap = 10;
-                    const groupGap = 24;
-                    const padTop = 60, padLeft = 40, padRight = 40, padBottom = 40;
+                const data = this.treeData;
+                const peers = data.children || [];
+                const self = this;
 
-                    // Column x positions
-                    const col0x = padLeft;
-                    const col1x = padLeft + boxW + colGap;
-                    const col2x = padLeft + (boxW + colGap) * 2;
+                // ---- Layout constants ----
+                const boxW = 180, boxH = 48;
+                const colGap = 100;
+                const rowGap = 8;
+                const groupGap = 14;
+                const padTop = 55, padLeft = 40, padRight = 40, padBottom = 40;
 
-                    // Build per-peer layout data
-                    const peerLayouts = [];
-                    let hasCol2 = false;
+                const col0x = padLeft;
+                const col1x = padLeft + boxW + colGap;
+                const col2x = padLeft + (boxW + colGap) * 2;
 
-                    peers.forEach(peer => {
-                        const downstream = peer.children || [];
-                        const transit = this.showTransit ? (peer.transit_children || []) : [];
-                        const col2Nodes = [...downstream, ...transit];
-                        if (col2Nodes.length > 0) hasCol2 = true;
-                        peerLayouts.push({ peer, downstream, transit, col2Nodes });
-                    });
+                // ---- Build layout rows ----
+                const rows = [];   // {type, node, peerAsn, y}
+                let hasCol2 = false;
+                let curY = padTop + 24;
 
-                    // Calculate positions — peer centered on its col2 group
-                    let curY = padTop + 30;
-                    peerLayouts.forEach(layout => {
-                        const col2H = layout.col2Nodes.length * (boxH + rowGap);
-                        const groupH = Math.max(boxH, col2H);
-                        layout.peerY = curY + (groupH - boxH) / 2;
-                        layout.col2StartY = curY;
-                        layout.groupH = groupH;
-                        curY += groupH + groupGap;
-                    });
+                peers.forEach(peer => {
+                    const isOpen = self.expandedPeers[peer.asn];
+                    const kids = peer.children || [];
+                    peer._visibleChildren = isOpen ? kids : [];
+                    if (isOpen && kids.length > 0) hasCol2 = true;
 
-                    // Unresolved section below peers
-                    let unresolvedStartY = curY;
-                    if (unresolvedNodes.length > 0) {
-                        curY += unresolvedNodes.length * (boxH + rowGap) + groupGap;
-                    }
+                    // peer itself
+                    const peerRow = { type: 'peer', node: peer, y: 0, col2Rows: [] };
 
-                    // Origin vertical center
-                    const allPeerYs = peerLayouts.map(l => l.peerY + boxH / 2);
-                    const originY = allPeerYs.length > 0
-                        ? (allPeerYs[0] + allPeerYs[allPeerYs.length - 1]) / 2 - boxH / 2
-                        : padTop + 30;
+                    if (isOpen && kids.length > 0) {
+                        // Peer centered on its children block
+                        const blockH = kids.length * (boxH + rowGap) - rowGap;
+                        const col2StartY = curY;
 
-                    // SVG dimensions
-                    const svgHeight = Math.max(600, curY + padBottom);
-                    const svgWidth = hasCol2
-                        ? col2x + boxW + padRight
-                        : col1x + boxW + padRight;
-
-                    container.style.height = svgHeight + 'px';
-
-                    this.svg = d3.select('#tree-container')
-                        .append('svg')
-                        .attr('width', '100%')
-                        .attr('height', svgHeight)
-                        .attr('viewBox', `0 0 ${svgWidth} ${svgHeight}`)
-                        .style('background', '#ffffff');
-
-                    this.gRef = this.svg.append('g');
-                    const g = this.gRef;
-
-                    this.zoom = d3.zoom()
-                        .scaleExtent([0.3, 3])
-                        .on('zoom', (event) => g.attr('transform', event.transform));
-                    this.svg.call(this.zoom);
-
-                    // Arrowhead marker
-                    const defs = this.svg.append('defs');
-                    defs.append('marker')
-                        .attr('id', 'arrowhead')
-                        .attr('viewBox', '0 0 10 10')
-                        .attr('refX', 9).attr('refY', 5)
-                        .attr('markerWidth', 6).attr('markerHeight', 6)
-                        .attr('orient', 'auto')
-                        .append('path').attr('d', 'M 0 0 L 10 5 L 0 10 z').attr('fill', '#334155');
-
-                    defs.append('marker')
-                        .attr('id', 'arrowhead-light')
-                        .attr('viewBox', '0 0 10 10')
-                        .attr('refX', 9).attr('refY', 5)
-                        .attr('markerWidth', 6).attr('markerHeight', 6)
-                        .attr('orient', 'auto')
-                        .append('path').attr('d', 'M 0 0 L 10 5 L 0 10 z').attr('fill', '#94a3b8');
-
-                    // Timestamp
-                    const now = new Date();
-                    const ts = now.toLocaleString('en-GB', {
-                        day: '2-digit', month: 'short', year: '2-digit',
-                        hour: '2-digit', minute: '2-digit', timeZoneName: 'short'
-                    });
-                    g.append('text')
-                        .attr('x', padLeft)
-                        .attr('y', 25)
-                        .style('font-family', "'Courier New', monospace")
-                        .style('font-size', '13px')
-                        .style('fill', '#334155')
-                        .text(ts);
-
-                    // ---- Background Regions ----
-
-                    // Origins region (green)
-                    const origRegionH = boxH + 40;
-                    g.append('rect')
-                        .attr('x', col0x - 15).attr('y', originY - 20)
-                        .attr('width', boxW + 30).attr('height', origRegionH)
-                        .attr('rx', 8)
-                        .attr('fill', '#dcfce7').attr('stroke', '#86efac').attr('stroke-width', 1);
-                    g.append('text')
-                        .attr('x', col0x + boxW / 2).attr('y', originY - 4)
-                        .attr('text-anchor', 'middle')
-                        .style('font-size', '11px').style('font-weight', '600').style('fill', '#15803d')
-                        .text('Origins');
-
-                    // Peers region
-                    if (peers.length > 0) {
-                        const peerRegionTop = padTop + 10;
-                        const peerRegionBot = peerLayouts.length > 0
-                            ? peerLayouts[peerLayouts.length - 1].peerY + boxH + 15
-                            : peerRegionTop + 80;
-                        const regionW = hasCol2
-                            ? (col2x + boxW + 15) - (col1x - 15)
-                            : boxW + 30;
-                        g.append('rect')
-                            .attr('x', col1x - 15).attr('y', peerRegionTop)
-                            .attr('width', regionW)
-                            .attr('height', peerRegionBot - peerRegionTop)
-                            .attr('rx', 8)
-                            .attr('fill', '#eff6ff').attr('stroke', '#bfdbfe').attr('stroke-width', 1);
-
-                        // Column headers
-                        g.append('text')
-                            .attr('x', col1x + boxW / 2).attr('y', peerRegionTop + 16)
-                            .attr('text-anchor', 'middle')
-                            .style('font-size', '11px').style('font-weight', '600').style('fill', '#1d4ed8')
-                            .text('Direct Peers');
-
-                        if (hasCol2) {
-                            g.append('text')
-                                .attr('x', col2x + boxW / 2).attr('y', peerRegionTop + 16)
-                                .attr('text-anchor', 'middle')
-                                .style('font-size', '11px').style('font-weight', '600').style('fill', '#1d4ed8')
-                                .text('Downstream');
-                        }
-                    }
-
-                    // ---- Helper: draw a box node ----
-                    const drawBox = (x, y, node, fill, stroke, opts = {}) => {
-                        const grp = g.append('g')
-                            .attr('class', 'node-box')
-                            .attr('transform', `translate(${x},${y})`);
-                        grp.append('rect')
-                            .attr('width', boxW).attr('height', boxH)
-                            .attr('fill', fill).attr('stroke', stroke);
-
-                        if (opts.dashed) {
-                            grp.select('rect').attr('stroke-dasharray', '5 3');
-                        }
-
-                        // Verification badge bar on left
-                        if (opts.verified !== undefined) {
-                            const badgeColor = opts.verified ? '#16a34a' : '#f59e0b';
-                            grp.append('rect')
-                                .attr('x', 0).attr('y', 0)
-                                .attr('width', 5).attr('height', boxH)
-                                .attr('fill', badgeColor)
-                                .attr('rx', 2);
-                        }
-
-                        // ASN label
-                        const textOffsetX = opts.verified !== undefined ? 5 : 0;
-                        grp.append('text')
-                            .attr('class', 'asn-label')
-                            .attr('x', (boxW + textOffsetX) / 2)
-                            .attr('y', 20)
-                            .attr('text-anchor', 'middle')
-                            .text('AS' + node.asn);
-
-                        // Name label (truncate)
-                        const maxLen = 20;
-                        const name = node.name || ('AS' + node.asn);
-                        const displayName = name.length > maxLen
-                            ? name.substring(0, maxLen - 2) + '\u2026'
-                            : name;
-                        grp.append('text')
-                            .attr('class', 'name-label')
-                            .attr('x', (boxW + textOffsetX) / 2)
-                            .attr('y', 37)
-                            .attr('text-anchor', 'middle')
-                            .text(displayName);
-
-                        // Tooltip
-                        grp.on('mouseover', (event) => {
-                            const tooltip = document.getElementById('tooltip');
-                            let content = '<strong>' + (node.name || 'AS' + node.asn) + '</strong>';
-                            content += '<br>ASN: ' + node.asn;
-                            if (node.info_type) content += '<br>Type: ' + node.info_type;
-                            if (node.verification) content += '<br>Status: ' + node.verification;
-                            if (node.shared_ix && node.shared_ix.length > 0)
-                                content += '<br>Shared IX: ' + node.shared_ix.join(', ');
-                            if (node.category) content += '<br>Role: ' + node.category;
-                            const nDown = (node.children || []).length;
-                            const nTransit = (node.transit_children || []).length;
-                            if (nDown > 0) content += '<br>Downstream: ' + nDown;
-                            if (nTransit > 0) content += '<br>Transit Reachable: ' + nTransit;
-                            tooltip.innerHTML = content;
-                            tooltip.style.display = 'block';
-                            tooltip.style.left = (event.pageX + 15) + 'px';
-                            tooltip.style.top = (event.pageY - 10) + 'px';
-                        }).on('mouseout', () => {
-                            document.getElementById('tooltip').style.display = 'none';
+                        kids.forEach((kid, ki) => {
+                            const ky = col2StartY + ki * (boxH + rowGap);
+                            peerRow.col2Rows.push({ node: kid, y: ky });
                         });
 
-                        return { cx: x + boxW, cy: y + boxH / 2, lx: x, ly: y + boxH / 2 };
-                    };
+                        peerRow.y = col2StartY + (blockH - boxH) / 2;
+                        curY = col2StartY + blockH + groupGap;
+                    } else {
+                        peerRow.y = curY;
+                        curY += boxH + groupGap;
+                    }
 
-                    // ---- Helper: orthogonal connector ----
-                    const drawLink = (x1, y1, x2, y2, cssClass) => {
-                        const midX = (x1 + x2) / 2;
-                        const markerId = cssClass === 'link-path-transit' ? 'url(#arrowhead-light)' : 'url(#arrowhead)';
-                        g.append('path')
-                            .attr('class', cssClass || 'link-path')
-                            .attr('d', `M${x1},${y1} H${midX} V${y2} H${x2}`)
-                            .attr('marker-end', markerId);
-                    };
+                    rows.push(peerRow);
+                });
 
-                    // ---- Draw Origin ----
-                    const origin = drawBox(
-                        col0x, originY,
-                        { asn: data.asn, name: data.name.split('(')[0].trim() },
-                        '#dcfce7', '#16a34a'
+                // Origin centered on all peers
+                const peerMidpoints = rows.map(r => r.y + boxH / 2);
+                const originY = peerMidpoints.length > 0
+                    ? (peerMidpoints[0] + peerMidpoints[peerMidpoints.length - 1]) / 2 - boxH / 2
+                    : padTop + 24;
+
+                // SVG dimensions
+                const svgHeight = Math.max(600, curY + padBottom);
+                const svgWidth = hasCol2
+                    ? col2x + boxW + padRight
+                    : col1x + boxW + padRight;
+
+                container.style.height = svgHeight + 'px';
+
+                this.svg = d3.select('#tree-container')
+                    .append('svg')
+                    .attr('width', '100%')
+                    .attr('height', svgHeight)
+                    .attr('viewBox', `0 0 ${svgWidth} ${svgHeight}`)
+                    .style('background', '#ffffff');
+
+                this.gRef = this.svg.append('g');
+                const g = this.gRef;
+
+                this.zoom = d3.zoom()
+                    .scaleExtent([0.2, 3])
+                    .on('zoom', (event) => g.attr('transform', event.transform));
+                this.svg.call(this.zoom);
+
+                // ---- Timestamp ----
+                const now = new Date();
+                const ts = now.toLocaleString('en-GB', {
+                    day: '2-digit', month: 'short', year: '2-digit',
+                    hour: '2-digit', minute: '2-digit', timeZoneName: 'short'
+                });
+                g.append('text')
+                    .attr('x', padLeft).attr('y', 20)
+                    .style('font-family', "'Courier New', monospace")
+                    .style('font-size', '12px').style('fill', '#94a3b8')
+                    .text(ts);
+
+                // ---- Background: Origins ----
+                g.append('rect')
+                    .attr('x', col0x - 12).attr('y', originY - 18)
+                    .attr('width', boxW + 24).attr('height', boxH + 36)
+                    .attr('rx', 8)
+                    .attr('fill', '#f0fdf4').attr('stroke', '#bbf7d0').attr('stroke-width', 1);
+                g.append('text')
+                    .attr('x', col0x + boxW / 2).attr('y', originY - 4)
+                    .attr('text-anchor', 'middle')
+                    .style('font-size', '10px').style('font-weight', '700')
+                    .style('fill', '#15803d').style('letter-spacing', '0.05em')
+                    .text('ORIGIN');
+
+                // ---- Background: Peers + Children ----
+                if (peers.length > 0) {
+                    const regionTop = padTop + 4;
+                    const regionBot = curY - groupGap + boxH / 2 + 10;
+                    const regionW = hasCol2
+                        ? (col2x + boxW + 12) - (col1x - 12)
+                        : boxW + 24;
+                    g.append('rect')
+                        .attr('x', col1x - 12).attr('y', regionTop)
+                        .attr('width', regionW)
+                        .attr('height', Math.max(regionBot - regionTop, boxH + 36))
+                        .attr('rx', 8)
+                        .attr('fill', '#fefce8').attr('stroke', '#fde68a').attr('stroke-width', 1)
+                        .attr('opacity', 0.45);
+                }
+
+                // ---- Helper: curved ribbon connector ----
+                const drawRibbon = (x1, y1, x2, y2, cssClass) => {
+                    const mx = (x1 + x2) / 2;
+                    g.append('path')
+                        .attr('class', 'ribbon ' + cssClass)
+                        .attr('d', `M${x1},${y1} C${mx},${y1} ${mx},${y2} ${x2},${y2}`);
+                };
+
+                // ---- Helper: draw box node ----
+                const drawBox = (x, y, node, fill, stroke, opts) => {
+                    opts = opts || {};
+                    const grp = g.append('g')
+                        .attr('class', 'node-box')
+                        .attr('transform', `translate(${x},${y})`);
+
+                    grp.append('rect')
+                        .attr('width', boxW).attr('height', boxH)
+                        .attr('fill', fill).attr('stroke', stroke)
+                        .attr('stroke-width', opts.strokeWidth || 1.5);
+
+                    if (opts.dashed) grp.select('rect').attr('stroke-dasharray', '5 3');
+
+                    // Left accent bar for peers
+                    if (opts.accentColor) {
+                        grp.append('rect')
+                            .attr('x', 0).attr('y', 0)
+                            .attr('width', 4).attr('height', boxH)
+                            .attr('fill', opts.accentColor)
+                            .attr('rx', 2);
+                    }
+
+                    const tx = opts.accentColor ? 6 : 0;
+
+                    grp.append('text')
+                        .attr('class', 'asn-label')
+                        .attr('x', (boxW + tx) / 2).attr('y', 19)
+                        .attr('text-anchor', 'middle')
+                        .text('AS' + node.asn);
+
+                    const maxLen = 22;
+                    const name = node.name || ('AS' + node.asn);
+                    const disp = name.length > maxLen ? name.substring(0, maxLen - 1) + '\u2026' : name;
+                    grp.append('text')
+                        .attr('class', 'name-label')
+                        .attr('x', (boxW + tx) / 2).attr('y', 33)
+                        .attr('text-anchor', 'middle')
+                        .text(disp);
+
+                    // Child count badge for peers
+                    if (opts.childCount !== undefined && opts.childCount > 0) {
+                        const expanded = opts.expanded;
+                        const label = expanded
+                            ? '\u25BC ' + opts.childCount
+                            : '\u25B6 ' + opts.childCount + ' networks';
+                        grp.append('text')
+                            .attr('class', 'count-label')
+                            .attr('x', (boxW + tx) / 2).attr('y', 44)
+                            .attr('text-anchor', 'middle')
+                            .text(label);
+                    }
+
+                    // Tooltip
+                    grp.on('mouseover', (event) => {
+                        const tip = document.getElementById('tooltip');
+                        let html = '<strong>' + (node.name || 'AS' + node.asn) + '</strong>';
+                        html += '<br>ASN: ' + node.asn;
+                        if (node.info_type) html += '<br>Type: ' + node.info_type;
+                        if (node.verification) html += '<br>Status: ' + node.verification;
+                        if (node.shared_ix && node.shared_ix.length)
+                            html += '<br>Shared IX: ' + node.shared_ix.join(', ');
+                        if (node.category) html += '<br>Role: ' + node.category;
+                        const kids = (node.children || []);
+                        if (kids.length) {
+                            const nDown = kids.filter(c => c.category === 'Downstream').length;
+                            const nTrans = kids.filter(c => c.category === 'Reachable Transit').length;
+                            if (nDown) html += '<br>Downstream: ' + nDown;
+                            if (nTrans) html += '<br>Reachable Transit: ' + nTrans;
+                        }
+                        tip.innerHTML = html;
+                        tip.style.display = 'block';
+                        tip.style.left = (event.pageX + 15) + 'px';
+                        tip.style.top = (event.pageY - 10) + 'px';
+                    }).on('mouseout', () => {
+                        document.getElementById('tooltip').style.display = 'none';
+                    });
+
+                    // Click handler for collapsible peers
+                    if (opts.clickAsn !== undefined) {
+                        grp.style('cursor', 'pointer');
+                        grp.on('click', () => { self.togglePeer(opts.clickAsn); });
+                    }
+
+                    return { cx: x + boxW, cy: y + boxH / 2, lx: x, ly: y + boxH / 2 };
+                };
+
+                // ---- Draw Origin ----
+                const origin = drawBox(
+                    col0x, originY,
+                    { asn: data.asn, name: data.name.split('(')[0].trim() },
+                    '#dcfce7', '#16a34a',
+                    { strokeWidth: 2 }
+                );
+
+                // ---- Draw Peers & their children ----
+                rows.forEach(row => {
+                    const peer = row.node;
+                    const kids = peer.children || [];
+                    const isOpen = self.expandedPeers[peer.asn];
+
+                    const peerAnchors = drawBox(
+                        col1x, row.y, peer,
+                        '#fff7ed', '#ea580c',
+                        {
+                            accentColor: peer.verified ? '#16a34a' : '#f59e0b',
+                            childCount: kids.length,
+                            expanded: isOpen,
+                            clickAsn: peer.asn,
+                            strokeWidth: 1.5,
+                        }
                     );
 
-                    // ---- Draw Peers & their children ----
-                    peerLayouts.forEach(layout => {
-                        const peer = layout.peer;
-                        const isVerified = peer.verified;
+                    // Origin -> Peer ribbon
+                    drawRibbon(origin.cx, origin.cy, peerAnchors.lx, peerAnchors.ly, 'ribbon-origin');
 
-                        // Peer box
-                        const peerFill = '#ffffff';
-                        const peerStroke = isVerified ? '#16a34a' : '#64748b';
-                        const peerAnchors = drawBox(
-                            col1x, layout.peerY, peer,
-                            peerFill, peerStroke,
-                            { verified: peer.verified }
-                        );
+                    // Draw children if expanded
+                    if (isOpen) {
+                        row.col2Rows.forEach(cr => {
+                            const kid = cr.node;
+                            const isTransit = kid.category === 'Reachable Transit';
+                            const kFill = isTransit ? '#f8fafc' : '#f1f5f9';
+                            const kStroke = isTransit ? '#cbd5e1' : '#94a3b8';
 
-                        // Origin -> Peer link
-                        drawLink(origin.cx, origin.cy, peerAnchors.lx, peerAnchors.ly, 'link-path-direct');
-
-                        // Col2 nodes: downstream first, then transit
-                        layout.col2Nodes.forEach((node, i) => {
-                            const ny = layout.col2StartY + i * (boxH + rowGap);
-                            const isTransit = node.category === 'Transit Reachable';
-                            const fill = isTransit ? '#f1f5f9' : '#dbeafe';
-                            const stroke = isTransit ? '#94a3b8' : '#3b82f6';
-                            const anchors = drawBox(
-                                col2x, ny, node,
-                                fill, stroke,
-                                { dashed: isTransit }
+                            const kidAnchors = drawBox(
+                                col2x, cr.y, kid,
+                                kFill, kStroke,
+                                { dashed: isTransit, strokeWidth: 1 }
                             );
-                            const linkClass = isTransit ? 'link-path-transit' : 'link-path';
-                            drawLink(peerAnchors.cx, peerAnchors.cy, anchors.lx, anchors.ly, linkClass);
-                        });
-                    });
 
-                    // ---- Draw Unresolved section ----
-                    if (unresolvedNodes.length > 0) {
-                        // Section label
-                        g.append('text')
-                            .attr('x', col1x + boxW / 2)
-                            .attr('y', unresolvedStartY - 6)
-                            .attr('text-anchor', 'middle')
-                            .style('font-size', '11px').style('font-weight', '600').style('fill', '#94a3b8')
-                            .text('Unresolved (' + unresolvedNodes.length + ')');
-
-                        unresolvedNodes.forEach((node, i) => {
-                            const ny = unresolvedStartY + i * (boxH + rowGap);
-                            const anchors = drawBox(
-                                col1x, ny, node,
-                                '#f8fafc', '#cbd5e1',
-                                { dashed: true }
+                            drawRibbon(
+                                peerAnchors.cx, peerAnchors.cy,
+                                kidAnchors.lx, kidAnchors.ly,
+                                isTransit ? 'ribbon-transit' : 'ribbon-origin'
                             );
-                            drawLink(origin.cx, origin.cy, anchors.lx, anchors.ly, 'link-path-transit');
                         });
                     }
-                },
+                });
+            },
 
-                resetZoom() {
-                    if (this.svg && this.zoom) {
-                        this.svg.transition().duration(500).call(
-                            this.zoom.transform,
-                            d3.zoomIdentity
-                        );
-                    }
+            resetZoom() {
+                if (this.svg && this.zoom) {
+                    this.svg.transition().duration(400).call(
+                        this.zoom.transform, d3.zoomIdentity
+                    );
                 }
-            };
-        }
+            }
+        };
+    }
     </script>
 </body>
 </html>
