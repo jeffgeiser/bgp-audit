@@ -487,42 +487,10 @@ async def routing_flow_page(request: Request):
         "facilities": zenlayer_state.get("facilities", [])
     })
 
-def _expand_as_set(as_set: str) -> List[Dict[str, Any]]:
-    """
-    Expand an AS-SET to its member ASNs using IRR data.
-    Results are cached to disk for 24 hours.
-    """
-    if not as_set or as_set == "":
-        return []
-
-    as_set = as_set.strip().upper()
-    cache_key = _cache_key("irr", as_set)
-
-    cached = _read_cache(cache_key)
-    if cached is not None:
-        return cached
-
-    try:
-        url = f"https://irrexplorer.nlnog.net/api/sets/member_of/{as_set}"
-        response = requests.get(url, timeout=10)
-        if response.status_code == 200:
-            data = response.json()
-            members = []
-            for item in data.get("directMembers", [])[:50]:
-                if item.startswith("AS") and item[2:].isdigit():
-                    members.append({"asn": int(item[2:]), "name": item})
-            _write_cache(cache_key, members)
-            return members
-    except Exception as e:
-        print(f"[IRR] Error expanding {as_set}: {e}")
-
-    return []
-
 @app.get("/api/routing-flow")
 async def get_routing_flow(
     location: str,
     location_type: str = "city",
-    expand_sets: bool = False
 ):
     """
     Build hierarchical routing flow data using AS-Path Frequency Analysis

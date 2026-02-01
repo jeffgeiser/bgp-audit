@@ -35,6 +35,7 @@
         /* Sankey ribbon connectors */
         .ribbon { fill: none; stroke-linecap: round; }
         .ribbon-origin  { stroke: #86efac; stroke-width: 2.5; opacity: 0.55; }
+        .ribbon-downstream { stroke: #60a5fa; stroke-width: 2; opacity: 0.5; }
         .ribbon-transit { stroke: #94a3b8; stroke-width: 1.2; opacity: 0.35; stroke-dasharray: 5 3; }
 
         /* Tooltip */
@@ -86,22 +87,52 @@
 
     <!-- Legend Bar -->
     <div class="bg-white border-b border-slate-200">
-        <div class="max-w-7xl mx-auto px-6 py-2.5 flex items-center gap-6">
+        <div class="max-w-7xl mx-auto px-6 py-2.5 flex items-center gap-5 flex-wrap">
             <span class="text-[10px] font-bold text-slate-400 uppercase tracking-widest">Legend</span>
-            <div class="flex items-center gap-1.5 text-xs">
+            <!-- Zenlayer Origin -->
+            <div class="flex items-center gap-1.5 text-xs relative group">
                 <span class="w-3.5 h-3.5 rounded-sm border-2 bg-[#dcfce7] border-[#16a34a]"></span>
-                <span class="text-slate-600 font-medium">Origin</span>
-                <span class="text-slate-400 ml-0.5">Zenlayer Infrastructure (AS21859, AS4229)</span>
+                <span class="text-slate-600 font-medium">Zenlayer Origin</span>
+                <span class="w-3.5 h-3.5 rounded-full bg-slate-200 text-slate-500 text-[9px] font-bold flex items-center justify-center cursor-help">i</span>
+                <div class="hidden group-hover:block absolute left-0 top-full mt-1 z-50 w-56 bg-slate-800 text-white text-[11px] rounded-lg px-3 py-2 shadow-lg">
+                    Zenlayer's own AS numbers (AS21859 &amp; AS4229). The root of every routing path.
+                </div>
             </div>
-            <div class="flex items-center gap-1.5 text-xs">
+            <!-- Verified Local Peer -->
+            <div class="flex items-center gap-1.5 text-xs relative group">
+                <span class="w-3.5 h-3.5 rounded-sm border-2 bg-[#fff7ed] border-[#16a34a]"></span>
+                <span class="text-slate-600 font-medium">Verified Local Peer</span>
+                <span class="w-3.5 h-3.5 rounded-full bg-slate-200 text-slate-500 text-[9px] font-bold flex items-center justify-center cursor-help">i</span>
+                <div class="hidden group-hover:block absolute left-0 top-full mt-1 z-50 w-64 bg-slate-800 text-white text-[11px] rounded-lg px-3 py-2 shadow-lg">
+                    Direct 1-hop BGP peer confirmed co-located at the same PeeringDB facility or sharing an Internet Exchange.
+                </div>
+            </div>
+            <!-- Remote / Logical Peer -->
+            <div class="flex items-center gap-1.5 text-xs relative group">
                 <span class="w-3.5 h-3.5 rounded-sm border-2 bg-[#fff7ed] border-[#ea580c]"></span>
-                <span class="text-slate-600 font-medium">Verified Peer</span>
-                <span class="text-slate-400 ml-0.5">Direct 1-hop BGP adjacency via path analysis</span>
+                <span class="text-slate-600 font-medium">Remote / Logical Peer</span>
+                <span class="w-3.5 h-3.5 rounded-full bg-slate-200 text-slate-500 text-[9px] font-bold flex items-center justify-center cursor-help">i</span>
+                <div class="hidden group-hover:block absolute left-0 top-full mt-1 z-50 w-64 bg-slate-800 text-white text-[11px] rounded-lg px-3 py-2 shadow-lg">
+                    Direct 1-hop BGP peer observed via AS-path analysis but not confirmed at this facility via PeeringDB. Likely peering over a remote IX or tunnel.
+                </div>
             </div>
-            <div class="flex items-center gap-1.5 text-xs">
+            <!-- Downstream -->
+            <div class="flex items-center gap-1.5 text-xs relative group">
+                <span class="w-3.5 h-3.5 rounded-sm border-2 bg-[#dbeafe] border-[#3b82f6]"></span>
+                <span class="text-slate-600 font-medium">Downstream</span>
+                <span class="w-3.5 h-3.5 rounded-full bg-slate-200 text-slate-500 text-[9px] font-bold flex items-center justify-center cursor-help">i</span>
+                <div class="hidden group-hover:block absolute left-0 top-full mt-1 z-50 w-56 bg-slate-800 text-white text-[11px] rounded-lg px-3 py-2 shadow-lg">
+                    Network that routes through a direct peer to reach Zenlayer. Confirmed via AS-path analysis.
+                </div>
+            </div>
+            <!-- Reachable Transit -->
+            <div class="flex items-center gap-1.5 text-xs relative group">
                 <span class="w-3.5 h-3.5 rounded-sm border-2 bg-[#f1f5f9] border-[#94a3b8]"></span>
                 <span class="text-slate-600 font-medium">Reachable Transit</span>
-                <span class="text-slate-400 ml-0.5">Networks reachable through our verified peers</span>
+                <span class="w-3.5 h-3.5 rounded-full bg-slate-200 text-slate-500 text-[9px] font-bold flex items-center justify-center cursor-help">i</span>
+                <div class="hidden group-hover:block absolute left-0 top-full mt-1 z-50 w-60 bg-slate-800 text-white text-[11px] rounded-lg px-3 py-2 shadow-lg">
+                    Network present at the facility but with no direct path to Zenlayer. Reachable through a peer's transit network.
+                </div>
             </div>
         </div>
     </div>
@@ -122,18 +153,6 @@
                         <option value="{{ city }}">{{ city }}</option>
                         {% endfor %}
                     </select>
-                </div>
-
-                <div class="flex items-center gap-2">
-                    <label class="text-xs font-bold text-slate-500 uppercase tracking-wider">Expand AS-SETs</label>
-                    <button
-                        @click="expandSets = !expandSets; if(selectedCity) loadRoutingFlow()"
-                        class="relative w-12 h-6 rounded-full transition-colors"
-                        :class="expandSets ? 'bg-[#00A9E0]' : 'bg-slate-300'"
-                    >
-                        <span class="absolute top-1 w-4 h-4 bg-white rounded-full shadow transition-transform"
-                              :class="expandSets ? 'left-7' : 'left-1'"></span>
-                    </button>
                 </div>
 
                 <div x-show="loading" class="flex items-center gap-2 text-slate-500">
@@ -207,7 +226,6 @@
     function routingFlow() {
         return {
             selectedCity: '',
-            expandSets: false,
             loading: false,
             treeData: null,
             directPeerCount: 0,
@@ -227,7 +245,7 @@
                 this.expandedPeers = {};
 
                 try {
-                    const url = `/audit/api/routing-flow?location=${encodeURIComponent(this.selectedCity)}&expand_sets=${this.expandSets}`;
+                    const url = `/audit/api/routing-flow?location=${encodeURIComponent(this.selectedCity)}`;
                     const resp = await fetch(url);
                     if (!resp.ok) throw new Error('Failed to load');
                     this.treeData = await resp.json();
@@ -494,9 +512,10 @@
                     const kids = peer.children || [];
                     const isOpen = self.expandedPeers[peer.asn];
 
+                    const peerStroke = peer.verified ? '#16a34a' : '#ea580c';
                     const peerAnchors = drawBox(
                         col1x, row.y, peer,
-                        '#fff7ed', '#ea580c',
+                        '#fff7ed', peerStroke,
                         {
                             accentColor: peer.verified ? '#16a34a' : '#f59e0b',
                             childCount: kids.length,
@@ -514,8 +533,8 @@
                         row.col2Rows.forEach(cr => {
                             const kid = cr.node;
                             const isTransit = kid.category === 'Reachable Transit';
-                            const kFill = isTransit ? '#f8fafc' : '#f1f5f9';
-                            const kStroke = isTransit ? '#cbd5e1' : '#94a3b8';
+                            const kFill = isTransit ? '#f1f5f9' : '#dbeafe';
+                            const kStroke = isTransit ? '#94a3b8' : '#3b82f6';
 
                             const kidAnchors = drawBox(
                                 col2x, cr.y, kid,
@@ -526,7 +545,7 @@
                             drawRibbon(
                                 peerAnchors.cx, peerAnchors.cy,
                                 kidAnchors.lx, kidAnchors.ly,
-                                isTransit ? 'ribbon-transit' : 'ribbon-origin'
+                                isTransit ? 'ribbon-transit' : 'ribbon-downstream'
                             );
                         });
                     }
