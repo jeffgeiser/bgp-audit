@@ -650,10 +650,7 @@ async def get_routing_flow(
                     verification = "Shared IX"
                     shared_ix = [ix_names.get(ix, f"IX-{ix}") for ix in common]
 
-            # Only add IX-verified external peers as Level 1 nodes
-            if not verified:
-                continue
-
+            # Include all external 1-hop peers as Exchange/IXP Level 1 nodes
             # Still include their downstream networks at the facility
             downstream_at_fac = (
                 peer_downstreams.get(hop_asn, set()) & facility_asn_set
