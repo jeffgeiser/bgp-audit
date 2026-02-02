@@ -446,15 +446,13 @@ async def discover_summary(
     location_type: str = "city",
     fac_id: Optional[int] = None
 ):
-    """Return a summary of network presence including direct peer highlights."""
+    """Return a summary with 3-way path-quality classification."""
     try:
         config = load_config()
         zenlayer_asns = config.get("ASNS", DEFAULT_CONFIG["ASNS"])
+        local_set = set(zenlayer_asns)
 
         all_nets = _get_discovery_data(fac_id, location, location_type, "all")
-        upstream = [n for n in all_nets if n["info_type"] == "NSP" or "Transit" in n["info_type"]]
-        content = [n for n in all_nets if n["info_type"] in ("Content",)]
-        eyeball = [n for n in all_nets if "Eyeball" in n["info_type"]]
 
         # AS-Path analysis: find direct peers from Zenlayer's own paths
         direct_peer_asns, _ = _analyze_zenlayer_paths(zenlayer_asns)
@@ -466,13 +464,65 @@ async def discover_summary(
             for n in all_nets if n["asn"] in direct_at_facility
         ]
 
+        # ----- IX detection for Exchange/IXP classification -----
+        target_fac_ids = []
+        if fac_id:
+            target_fac_ids = [fac_id]
+        elif location:
+            if location_type == "city":
+                target_fac_ids = [
+                    f["id"] for f in zenlayer_state["facilities"]
+                    if f.get("city") == location
+                ]
+            else:
+                mapping = config.get("METRO_MAP", {})
+                cities = [c for c, m in mapping.items() if m == location]
+                target_fac_ids = [
+                    f["id"] for f in zenlayer_state["facilities"]
+                    if f.get("city") in cities
+                ]
+
+        ix_member_asns: set = set()
+        if target_fac_ids:
+            fac_query = ",".join(map(str, target_fac_ids))
+            ix_at_facs = fetch_peeringdb(f"ixfac?fac_id__in={fac_query}")
+            local_ix_ids = {
+                ix.get("ix_id") for ix in ix_at_facs if ix.get("ix_id")
+            }
+
+            zenlayer_net_ids = [
+                n["id"] for n in zenlayer_state.get("networks", [])
+            ]
+            zl_ix_ids: set = set()
+            for nid in zenlayer_net_ids:
+                for rec in fetch_peeringdb(f"netixlan?net_id={nid}"):
+                    if rec.get("ix_id"):
+                        zl_ix_ids.add(rec["ix_id"])
+
+            shared_ixes = local_ix_ids & zl_ix_ids
+            if shared_ixes:
+                for ix_id in shared_ixes:
+                    for rec in fetch_peeringdb(f"netixlan?ix_id={ix_id}"):
+                        if rec.get("asn"):
+                            ix_member_asns.add(rec["asn"])
+
+            ix_member_asns -= local_set
+            ix_member_asns -= direct_at_facility
+
+        exchange_ixp_at_facility = facility_asns & ix_member_asns
+        transit_at_facility = (
+            facility_asns - direct_at_facility
+            - exchange_ixp_at_facility - local_set
+        )
+
         return {
             "total": len(all_nets),
-            "upstream_count": len(upstream),
-            "content_count": len(content),
-            "eyeball_count": len(eyeball),
+            "direct_on_net_count": len(direct_neighbors),
+            "exchange_ixp_count": len(exchange_ixp_at_facility),
+            "transit_count": len(transit_at_facility),
             "direct_peers": sorted(direct_neighbors, key=lambda x: x["name"]),
-            "direct_peer_count": len(direct_neighbors),
+            "direct_peer_asns": sorted(list(direct_at_facility)),
+            "exchange_ixp_asns": sorted(list(exchange_ixp_at_facility)),
         }
     except Exception as e:
         print(f"[API] Summary error: {e}")
@@ -682,7 +732,7 @@ async def get_routing_flow(
                 "verified": verified,
                 "verification": verification,
                 "shared_ix": shared_ix,
-                "category": "Direct Peer",
+                "category": "Exchange/IXP" if verified else "Upstream Transit",
                 "children": children,
             }
             assigned_asns.add(hop_asn)
@@ -747,11 +797,17 @@ async def get_routing_flow(
             if c.get("category") == "Downstream"
         )
 
+        direct_on_net = [p for p in direct_list if p["category"] == "Direct Peer"]
+        exchange_ixp_peers = [p for p in direct_list if p["category"] == "Exchange/IXP"]
+        upstream_transit_peers = [p for p in direct_list if p["category"] == "Upstream Transit"]
+
         tree = {
             "name": f"Zenlayer ({', '.join(f'AS{asn}' for asn in zenlayer_asns)})",
             "asn": zenlayer_asns[0],
             "location": location,
-            "direct_peer_count": len(direct_list),
+            "direct_on_net_count": len(direct_on_net),
+            "exchange_ixp_count": len(exchange_ixp_peers),
+            "upstream_transit_count": len(upstream_transit_peers),
             "downstream_count": downstream_total,
             "transit_nested_count": transit_nested,
             "children": direct_list,

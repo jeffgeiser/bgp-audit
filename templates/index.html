@@ -175,8 +175,8 @@
                         <svg class="w-4 h-4 text-emerald-700" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 3v4M3 5h4M6 17v4m-2-2h4m5-16l2.286 6.857L21 12l-5.714 2.143L13 21l-2.286-6.857L5 12l5.714-2.143L13 3z" /></svg>
                     </div>
                     <div class="text-left">
-                        <p class="text-[10px] font-black text-slate-400 uppercase tracking-wider">Direct Peer</p>
-                        <p class="text-lg font-black text-emerald-700 leading-tight" x-text="summary?.direct_peer_count || 0"></p>
+                        <p class="text-[10px] font-black text-slate-400 uppercase tracking-wider">Direct On-Net</p>
+                        <p class="text-lg font-black text-emerald-700 leading-tight" x-text="summary?.direct_on_net_count || 0"></p>
                     </div>
                 </button>
 
@@ -190,7 +190,7 @@
                     </div>
                     <div class="text-left">
                         <p class="text-[10px] font-black text-slate-400 uppercase tracking-wider">Exchange / IXP</p>
-                        <p class="text-lg font-black text-amber-700 leading-tight" x-text="summary?.upstream_count || 0"></p>
+                        <p class="text-lg font-black text-amber-700 leading-tight" x-text="summary?.exchange_ixp_count || 0"></p>
                     </div>
                 </button>
 
@@ -204,7 +204,7 @@
                     </div>
                     <div class="text-left">
                         <p class="text-[10px] font-black text-slate-400 uppercase tracking-wider">Upstream Transit</p>
-                        <p class="text-lg font-black text-red-600 leading-tight" x-text="summary?.content_count || 0"></p>
+                        <p class="text-lg font-black text-red-600 leading-tight" x-text="summary?.transit_count || 0"></p>
                     </div>
                 </button>
             </div>
@@ -286,9 +286,10 @@
                 },
 
                 getHealth(net) {
-                    const directAsns = (this.summary?.direct_peers || []).map(p => p.asn);
+                    const directAsns = this.summary?.direct_peer_asns || [];
                     if (directAsns.includes(net.asn)) return 'green';
-                    if (net.info_type === 'Content') return 'yellow';
+                    const ixpAsns = this.summary?.exchange_ixp_asns || [];
+                    if (ixpAsns.includes(net.asn)) return 'yellow';
                     return 'red';
                 },
 
@@ -308,7 +309,7 @@
                 },
 
                 get tileFilterLabel() {
-                    const labels = { all: 'All Networks', green: 'Direct Peers', yellow: 'Exchange / IXP Networks', red: 'Upstream Transit Networks' };
+                    const labels = { all: 'All Networks', green: 'Direct On-Net Networks', yellow: 'Exchange / IXP Networks', red: 'Upstream Transit Networks' };
                     return labels[this.tileFilter] || '';
                 },
 

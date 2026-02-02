@@ -169,6 +169,22 @@
                     <span class="text-xs font-medium">Loading hierarchy...</span>
                 </div>
 
+                <div class="flex items-center gap-2" x-show="treeData">
+                    <span class="text-xs font-bold text-slate-500 uppercase tracking-wider">Show</span>
+                    <button @click="peerFilter = 'all'; renderDiagram()"
+                        class="px-3 py-1.5 text-xs font-bold rounded-lg transition-colors"
+                        :class="peerFilter === 'all' ? 'bg-[#00205B] text-white' : 'text-slate-600 bg-slate-100 hover:bg-slate-200'">All</button>
+                    <button @click="peerFilter = 'direct'; renderDiagram()"
+                        class="px-3 py-1.5 text-xs font-bold rounded-lg transition-colors"
+                        :class="peerFilter === 'direct' ? 'bg-emerald-600 text-white' : 'text-slate-600 bg-slate-100 hover:bg-slate-200'">Direct On-Net</button>
+                    <button @click="peerFilter = 'ixp'; renderDiagram()"
+                        class="px-3 py-1.5 text-xs font-bold rounded-lg transition-colors"
+                        :class="peerFilter === 'ixp' ? 'bg-amber-600 text-white' : 'text-slate-600 bg-slate-100 hover:bg-slate-200'">Exchange / IXP</button>
+                    <button @click="peerFilter = 'transit'; renderDiagram()"
+                        class="px-3 py-1.5 text-xs font-bold rounded-lg transition-colors"
+                        :class="peerFilter === 'transit' ? 'bg-slate-600 text-white' : 'text-slate-600 bg-slate-100 hover:bg-slate-200'">Upstream Transit</button>
+                </div>
+
                 <div class="ml-auto flex items-center gap-3" x-show="treeData">
                     <button @click="expandAll()" class="px-3 py-1.5 text-xs font-bold text-slate-600 bg-slate-100 rounded-lg hover:bg-slate-200 transition-colors">
                         Expand All Downstreams
@@ -209,9 +225,10 @@
                 <div>
                     <h2 class="font-bold text-slate-800" x-text="'Routing Flow: ' + selectedCity"></h2>
                     <p class="text-xs text-slate-500 mt-1">
-                        <span x-text="directPeerCount + ' Direct Peers'"></span>
+                        <span x-text="directOnNetCount + ' Direct On-Net'"></span>
+                        <span x-show="exchangeIxpCount > 0"> &bull; <span x-text="exchangeIxpCount + ' Exchange / IXP'"></span></span>
+                        <span x-show="upstreamTransitCount > 0"> &bull; <span x-text="upstreamTransitCount + ' Upstream Transit'"></span></span>
                         <span x-show="downstreamCount > 0"> &bull; <span x-text="downstreamCount + ' Downstream'"></span></span>
-                        <span x-show="transitNestedCount > 0"> &bull; <span x-text="transitNestedCount + ' Upstream Transit'"></span></span>
                         &mdash; <span class="text-slate-400">Click a peer to expand/collapse</span>
                     </p>
                 </div>
@@ -234,9 +251,11 @@
             selectedCity: '',
             loading: false,
             treeData: null,
-            directPeerCount: 0,
+            directOnNetCount: 0,
+            exchangeIxpCount: 0,
+            upstreamTransitCount: 0,
             downstreamCount: 0,
-            transitNestedCount: 0,
+            peerFilter: 'direct',
             svg: null,
             zoom: null,
             gRef: null,
@@ -262,9 +281,11 @@
                     const resp = await fetch(url);
                     if (!resp.ok) throw new Error('Failed to load');
                     this.treeData = await resp.json();
-                    this.directPeerCount = this.treeData.direct_peer_count || 0;
+                    this.directOnNetCount = this.treeData.direct_on_net_count || 0;
+                    this.exchangeIxpCount = this.treeData.exchange_ixp_count || 0;
+                    this.upstreamTransitCount = this.treeData.upstream_transit_count || 0;
                     this.downstreamCount = this.treeData.downstream_count || 0;
-                    this.transitNestedCount = this.treeData.transit_nested_count || 0;
+                    this.peerFilter = 'direct';
                     // All peers collapsed by default; user clicks to expand
                     (this.treeData.children || []).forEach(p => { this.expandedPeers[p.asn] = false; });
                 } catch (err) {
@@ -298,7 +319,12 @@
                 d3.select('#tree-container').selectAll('*').remove();
 
                 const data = this.treeData;
-                const peers = data.children || [];
+                let peers = data.children || [];
+                if (this.peerFilter !== 'all') {
+                    const catMap = { direct: 'Direct Peer', ixp: 'Exchange/IXP', transit: 'Upstream Transit' };
+                    const cat = catMap[this.peerFilter];
+                    if (cat) peers = peers.filter(p => p.category === cat);
+                }
                 const self = this;
 
                 // ---- Layout constants ----
@@ -546,13 +572,14 @@
                     const kids = peer.children || [];
                     const isOpen = self.expandedPeers[peer.asn];
 
-                    const peerFill = '#fff7ed';
-                    const peerStroke = peer.verified ? '#16a34a' : '#ea580c';
+                    const peerCat = peer.category || 'Upstream Transit';
+                    const peerFill = peerCat === 'Upstream Transit' ? '#f1f5f9' : '#fff7ed';
+                    const peerStroke = peerCat === 'Direct Peer' ? '#16a34a' : peerCat === 'Exchange/IXP' ? '#ea580c' : '#94a3b8';
                     const peerAnchors = drawBox(
                         col1x, row.y, peer,
                         peerFill, peerStroke,
                         {
-                            accentColor: peer.verified ? '#16a34a' : '#f59e0b',
+                            accentColor: peerCat === 'Direct Peer' ? '#16a34a' : peerCat === 'Exchange/IXP' ? '#f59e0b' : '#94a3b8',
                             childCount: kids.length,
                             expanded: isOpen,
                             clickAsn: peer.asn,
