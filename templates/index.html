@@ -373,7 +373,6 @@
                 async refreshData() {
                     this.loading = true;
                     this.networks = [];
-                    this.tileFilter = '';
                     this.searchQuery = '';
                     try {
                         let url = `/audit/api/discover?category=${this.viewMode}`;
@@ -399,6 +398,8 @@
                         if (summaryResponse.ok) {
                             this.summary = await summaryResponse.json();
                         }
+                        // Auto-show all networks after load
+                        this.tileFilter = 'all';
                     } catch (err) {
                         console.error('Audit Engine Failure:', err);
                     } finally {
