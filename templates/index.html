@@ -112,16 +112,16 @@
     </aside>
 
     <!-- Main Content -->
-    <main class="flex-1 p-10 flex flex-col gap-8 overflow-y-auto h-screen">
+    <main class="flex-1 px-8 py-5 flex flex-col gap-4 overflow-y-auto h-screen">
         <!-- Dashboard Header -->
-        <header class="flex justify-between items-end">
+        <header class="flex justify-between items-center">
             <div>
-                <nav class="flex text-[10px] font-bold text-slate-400 uppercase tracking-widest mb-2 gap-2 items-center">
+                <nav class="flex text-[10px] font-bold text-slate-400 uppercase tracking-widest mb-1 gap-2 items-center">
                     <span class="px-2 py-0.5 rounded" :class="isMarketScope ? 'bg-indigo-50 text-indigo-600' : 'bg-slate-100 text-slate-600'" x-text="isMarketScope ? 'MARKET AGGREGATION' : 'SITE AUDIT'"></span>
                     <span>/</span>
                     <span class="text-[#00A9E0]" x-text="viewModeLabel"></span>
                 </nav>
-                <h1 class="text-4xl font-black text-[#00205B] tracking-tight leading-none" x-text="displayTitle"></h1>
+                <h1 class="text-2xl font-black text-[#00205B] tracking-tight leading-none" x-text="displayTitle"></h1>
             </div>
             
             <!-- View Mode Filter -->
@@ -145,8 +145,8 @@
         </header>
 
         <!-- Neighbor Summary Bar -->
-        <div x-show="summary" x-cloak class="bg-white rounded-2xl border border-slate-200 shadow-sm overflow-hidden">
-            <div class="px-8 py-5 flex flex-wrap items-center gap-6">
+        <div x-show="summary" x-cloak class="bg-white rounded-2xl border border-slate-200 shadow-sm overflow-hidden flex-shrink-0">
+            <div class="px-6 py-3 flex flex-wrap items-center gap-5">
                 <!-- Stat chips -->
                 <div class="flex items-center gap-2">
                     <div class="w-9 h-9 rounded-xl bg-[#00205B] flex items-center justify-center">
@@ -215,13 +215,13 @@
         <!-- Result Table Container -->
         <div class="flex-1 min-h-0 bg-white rounded-3xl border border-slate-200 shadow-xl shadow-slate-200/50 flex flex-col overflow-hidden">
             <!-- Table Action Bar -->
-            <div class="px-8 py-6 bg-slate-50/50 border-b border-slate-100 flex flex-col gap-4">
-                <div class="flex flex-col md:flex-row justify-between items-center gap-6">
+            <div class="px-6 py-3 bg-slate-50/50 border-b border-slate-100 flex flex-col gap-2">
+                <div class="flex flex-col md:flex-row justify-between items-center gap-3">
                     <div class="flex items-center gap-4">
                         <div x-show="loading" class="w-5 h-5 border-2 border-[#00205B] border-t-transparent rounded-full animate-spin"></div>
                         <div class="flex flex-col">
-                            <h2 class="text-lg font-black text-[#00205B]" x-text="tableTitle"></h2>
-                            <p class="text-xs text-slate-400 font-medium" x-text="networks.length ? 'Found ' + networks.length + ' unique networks' : 'Selection required'"></p>
+                            <h2 class="text-sm font-black text-[#00205B]" x-text="tableTitle"></h2>
+                            <p class="text-[11px] text-slate-400 font-medium" x-text="networks.length ? 'Found ' + networks.length + ' unique networks' : 'Selection required'"></p>
                         </div>
                     </div>
 
@@ -230,7 +230,7 @@
                             type="text"
                             x-model="searchQuery"
                             placeholder="Search ASN or Provider..."
-                            class="w-full pl-12 pr-4 py-3 bg-white border border-slate-200 rounded-2xl text-sm focus:ring-4 focus:ring-[#00A9E0]/10 focus:border-[#00A9E0] outline-none transition-all shadow-inner"
+                            class="w-full pl-10 pr-4 py-2 bg-white border border-slate-200 rounded-xl text-sm focus:ring-4 focus:ring-[#00A9E0]/10 focus:border-[#00A9E0] outline-none transition-all shadow-inner"
                         >
                         <svg class="w-5 h-5 absolute left-4 top-1/2 -translate-y-1/2 text-slate-300" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z" /></svg>
                     </div>
@@ -276,15 +276,15 @@
                 <table class="w-full text-left">
                     <thead class="sticky top-0 bg-white/95 backdrop-blur z-10">
                         <tr class="text-[10px] font-black text-slate-400 uppercase tracking-[0.2em] border-b border-slate-100">
-                            <th class="pl-6 pr-2 py-5 w-10"></th>
-                            <th class="px-4 py-5">ASN</th>
-                            <th class="px-4 py-5">Network Name</th>
-                            <th class="px-4 py-5">Info Type</th>
+                            <th class="pl-5 pr-2 py-3 w-10"></th>
+                            <th class="px-3 py-3">ASN</th>
+                            <th class="px-3 py-3">Network Name</th>
+                            <th class="px-3 py-3">Info Type</th>
                             <template x-if="viewMode !== 'upstream'">
-                                <th class="px-4 py-5">Traffic Level</th>
+                                <th class="px-3 py-3">Traffic Level</th>
                             </template>
-                            <th class="px-4 py-5">Peering Policy</th>
-                            <th class="px-4 py-5 text-right pr-8">DB</th>
+                            <th class="px-3 py-3">Peering Policy</th>
+                            <th class="px-3 py-3 text-right pr-6">DB</th>
                         </tr>
                     </thead>
                     <tbody>
@@ -293,35 +293,35 @@
                                 <td colspan="7" class="p-0">
                                     <table class="w-full">
                                         <tr @click="toggleRow(net.asn)" class="hover:bg-slate-50/50 transition-all group cursor-pointer border-b border-slate-50">
-                                            <td class="pl-6 pr-2 py-5 w-10">
+                                            <td class="pl-5 pr-2 py-3 w-10">
                                                 <div class="flex items-center gap-2">
                                                     <span class="w-2.5 h-2.5 rounded-full flex-shrink-0"
                                                           :class="getHealth(net) === 'green' ? 'bg-emerald-400' : getHealth(net) === 'yellow' ? 'bg-amber-400' : 'bg-red-400'"></span>
                                                     <svg class="w-4 h-4 text-slate-400 transition-transform" :class="expandedRow === net.asn ? 'rotate-90' : ''" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 5l7 7-7 7" /></svg>
                                                 </div>
                                             </td>
-                                            <td class="px-4 py-5">
-                                                <span class="font-mono font-black text-[#00A9E0] bg-blue-50 px-2 py-1 rounded-lg">AS<span x-text="net.asn"></span></span>
+                                            <td class="px-3 py-3">
+                                                <span class="font-mono font-black text-[#00A9E0] bg-blue-50 px-2 py-0.5 rounded-lg text-xs">AS<span x-text="net.asn"></span></span>
                                             </td>
-                                            <td class="px-4 py-5">
-                                                <div class="font-black text-[#00205B] group-hover:text-[#00A9E0] transition-colors" x-text="net.name"></div>
+                                            <td class="px-3 py-3">
+                                                <div class="font-bold text-sm text-[#00205B] group-hover:text-[#00A9E0] transition-colors" x-text="net.name"></div>
                                             </td>
-                                            <td class="px-4 py-5">
+                                            <td class="px-3 py-3">
                                                 <span
-                                                    class="px-3 py-1 rounded-full text-[10px] font-black uppercase tracking-wider"
+                                                    class="px-2.5 py-0.5 rounded-full text-[10px] font-black uppercase tracking-wider"
                                                     :class="net.info_type === 'NSP' ? 'bg-amber-100 text-amber-700' : 'bg-emerald-100 text-emerald-700'"
                                                     x-text="net.info_type"
                                                 ></span>
                                             </td>
                                             <template x-if="viewMode !== 'upstream'">
-                                                <td class="px-4 py-5">
+                                                <td class="px-3 py-3">
                                                     <div class="text-xs font-bold text-slate-600" x-text="net.traffic_range"></div>
                                                 </td>
                                             </template>
-                                            <td class="px-4 py-5">
+                                            <td class="px-3 py-3">
                                                 <p class="text-xs text-slate-500 font-medium leading-relaxed max-w-xs" x-text="net.policy"></p>
                                             </td>
-                                            <td class="px-4 py-5 text-right pr-8">
+                                            <td class="px-3 py-3 text-right pr-6">
                                                 <a :href="'https://www.peeringdb.com/asn/' + net.asn" target="_blank" @click.stop class="text-slate-300 hover:text-[#00A9E0]">
                                                     <svg class="w-5 h-5 inline" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M10 6H6a2 2 0 00-2 2v10a2 2 0 002 2h10a2 2 0 002-2v-4M14 4h6m0 0v6m0-6L10 14" /></svg>
                                                 </a>
@@ -329,7 +329,7 @@
                                         </tr>
                                         <!-- Expandable Detail Row -->
                                         <tr x-show="expandedRow === net.asn" x-transition class="bg-slate-50/80">
-                                            <td colspan="7" class="px-8 py-5">
+                                            <td colspan="7" class="px-6 py-3">
                                                 <div class="grid grid-cols-3 gap-6 text-sm">
                                                     <div>
                                                         <p class="text-[10px] font-black text-slate-400 uppercase tracking-wider mb-1">Health Status</p>
@@ -358,7 +358,7 @@
 
                         <!-- Empty States -->
                         <tr x-show="!scopeId">
-                            <td colspan="7" class="px-8 py-40 text-center">
+                            <td colspan="7" class="px-8 py-20 text-center">
                                 <div class="max-w-sm mx-auto">
                                     <div class="w-16 h-16 bg-slate-100 rounded-3xl flex items-center justify-center mx-auto mb-6">
                                         <svg class="w-8 h-8 text-slate-400" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z" /></svg>
@@ -378,7 +378,7 @@
             </div>
         </div>
 
-        <footer class="flex justify-between items-center text-[10px] font-black text-slate-400 uppercase tracking-[0.3em] pb-4">
+        <footer class="flex-shrink-0 flex justify-between items-center text-[10px] font-black text-slate-400 uppercase tracking-[0.3em] py-2">
             <p>Source: PeeringDB API</p>
             <p>&copy; Zenlayer Global Operations</p>
         </footer>
