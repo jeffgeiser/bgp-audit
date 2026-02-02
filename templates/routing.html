@@ -11,6 +11,11 @@
     <style>
         [x-cloak] { display: none !important; }
         body { font-family: 'Inter', sans-serif; }
+        .donut-logo {
+            background:
+                linear-gradient(transparent, transparent) padding-box,
+                conic-gradient(from 200deg, #93c5fd, #00a9e0, #38bdf8, #93c5fd) border-box;
+        }
 
         /* Box nodes */
         .node-box { cursor: pointer; }
@@ -67,14 +72,13 @@
     <header class="bg-[#00205B] text-white shadow-xl">
         <div class="max-w-7xl mx-auto px-6 py-4 flex items-center justify-between">
             <div class="flex items-center space-x-4">
-                <a href="/audit/" class="flex items-center space-x-3 hover:opacity-80 transition-opacity">
-                    <svg class="w-10 h-10 flex-shrink-0" viewBox="0 0 40 40" fill="none">
-                        <defs><linearGradient id="zenGrad" x1="12" y1="4" x2="28" y2="36"><stop offset="0%" stop-color="#7DD3FC"/><stop offset="100%" stop-color="#00A9E0"/></linearGradient></defs>
-                        <circle cx="20" cy="20" r="14" stroke="url(#zenGrad)" stroke-width="4.5" stroke-linecap="round" stroke-dasharray="80 8" transform="rotate(-130 20 20)"/>
-                    </svg>
-                    <div>
-                        <div class="text-xl font-bold tracking-tight text-white">zenlayer</div>
-                        <div class="text-[9px] font-semibold text-white/40 uppercase tracking-[0.25em]">BGP Explorer</div>
+                <a href="/audit/" class="flex items-center space-x-2.5 hover:opacity-80 transition-opacity">
+                    <div class="relative w-8 h-8 flex items-center justify-center">
+                        <div class="absolute inset-0 rounded-full border-[5px] border-transparent donut-logo"></div>
+                    </div>
+                    <div class="flex flex-col">
+                        <span class="text-[22px] font-medium text-white tracking-tight leading-none">zenlayer</span>
+                        <span class="text-[9px] font-bold text-white/40 uppercase tracking-[0.2em] mt-0.5 leading-none">BGP Explorer</span>
                     </div>
                 </a>
                 <span class="text-white/30">|</span>
