@@ -112,7 +112,7 @@
     </aside>
 
     <!-- Main Content -->
-    <main class="flex-1 px-8 py-5 flex flex-col gap-4 overflow-y-auto h-screen">
+    <main class="flex-1 px-8 py-5 flex flex-col gap-4 overflow-y-auto">
         <!-- Dashboard Header -->
         <header class="flex justify-between items-center">
             <div>
@@ -144,241 +144,111 @@
             </div>
         </header>
 
+        <!-- Loading indicator -->
+        <div x-show="loading" class="flex items-center gap-3 py-2">
+            <div class="w-5 h-5 border-2 border-[#00205B] border-t-transparent rounded-full animate-spin"></div>
+            <span class="text-sm text-slate-500 font-medium">Scanning networks...</span>
+        </div>
+
         <!-- Neighbor Summary Bar -->
-        <div x-show="summary" x-cloak class="bg-white rounded-2xl border border-slate-200 shadow-sm overflow-hidden flex-shrink-0">
+        <div x-show="summary" x-cloak class="bg-white rounded-2xl border border-slate-200 shadow-sm overflow-hidden">
+            <!-- Clickable stat tiles -->
             <div class="px-6 py-3 flex flex-wrap items-center gap-5">
-                <!-- Stat chips -->
-                <div class="flex items-center gap-2">
+                <button @click="tileFilter = tileFilter === 'all' ? '' : 'all'"
+                    class="flex items-center gap-2 rounded-xl px-2 py-1 -mx-2 transition-all cursor-pointer"
+                    :class="tileFilter === 'all' ? 'ring-2 ring-[#00205B]/30 bg-slate-50' : 'hover:bg-slate-50'">
                     <div class="w-9 h-9 rounded-xl bg-[#00205B] flex items-center justify-center">
                         <svg class="w-4 h-4 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13 10V3L4 14h7v7l9-11h-7z" /></svg>
                     </div>
-                    <div>
+                    <div class="text-left">
                         <p class="text-[10px] font-black text-slate-400 uppercase tracking-wider">Total Networks</p>
                         <p class="text-lg font-black text-[#00205B] leading-tight" x-text="summary?.total || 0"></p>
                     </div>
-                </div>
+                </button>
 
                 <div class="w-px h-10 bg-slate-200"></div>
 
-                <a :href="selectedCity ? '/audit/routing?city=' + encodeURIComponent(selectedCity) : '/audit/routing'" class="flex items-center gap-2 hover:opacity-75 transition-opacity cursor-pointer">
-                    <div class="w-9 h-9 rounded-xl bg-amber-100 flex items-center justify-center">
-                        <svg class="w-4 h-4 text-amber-700" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 3v4M3 5h4M6 17v4m-2-2h4m5-16l2.286 6.857L21 12l-5.714 2.143L13 21l-2.286-6.857L5 12l5.714-2.143L13 3z" /></svg>
-                    </div>
-                    <div>
-                        <p class="text-[10px] font-black text-slate-400 uppercase tracking-wider">Direct On-Net</p>
-                        <p class="text-lg font-black text-amber-700 leading-tight" x-text="summary?.direct_peer_count || 0"></p>
-                    </div>
-                </a>
-
-                <div class="w-px h-10 bg-slate-200"></div>
-
-                <div class="flex items-center gap-2">
-                    <div class="w-9 h-9 rounded-xl bg-blue-100 flex items-center justify-center">
-                        <svg class="w-4 h-4 text-[#00A9E0]" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M8 7h12m0 0l-4-4m4 4l-4 4m0 6H4m0 0l4 4m-4-4l4-4" /></svg>
-                    </div>
-                    <div>
-                        <p class="text-[10px] font-black text-slate-400 uppercase tracking-wider">Exchange / IXP</p>
-                        <p class="text-lg font-black text-[#00A9E0] leading-tight" x-text="summary?.upstream_count || 0"></p>
-                    </div>
-                </div>
-
-                <div class="w-px h-10 bg-slate-200"></div>
-
-                <div class="flex items-center gap-2">
+                <button @click="tileFilter = tileFilter === 'green' ? '' : 'green'"
+                    class="flex items-center gap-2 rounded-xl px-2 py-1 -mx-2 transition-all cursor-pointer"
+                    :class="tileFilter === 'green' ? 'ring-2 ring-emerald-300 bg-emerald-50' : 'hover:bg-slate-50'">
                     <div class="w-9 h-9 rounded-xl bg-emerald-100 flex items-center justify-center">
-                        <svg class="w-4 h-4 text-emerald-600" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 11H5m14 0a2 2 0 012 2v6a2 2 0 01-2 2H5a2 2 0 01-2-2v-6a2 2 0 012-2m14 0V9a2 2 0 00-2-2M5 11V9a2 2 0 012-2m0 0V5a2 2 0 012-2h6a2 2 0 012 2v2M7 7h10" /></svg>
+                        <svg class="w-4 h-4 text-emerald-700" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 3v4M3 5h4M6 17v4m-2-2h4m5-16l2.286 6.857L21 12l-5.714 2.143L13 21l-2.286-6.857L5 12l5.714-2.143L13 3z" /></svg>
                     </div>
-                    <div>
+                    <div class="text-left">
+                        <p class="text-[10px] font-black text-slate-400 uppercase tracking-wider">Direct Peer</p>
+                        <p class="text-lg font-black text-emerald-700 leading-tight" x-text="summary?.direct_peer_count || 0"></p>
+                    </div>
+                </button>
+
+                <div class="w-px h-10 bg-slate-200"></div>
+
+                <button @click="tileFilter = tileFilter === 'yellow' ? '' : 'yellow'"
+                    class="flex items-center gap-2 rounded-xl px-2 py-1 -mx-2 transition-all cursor-pointer"
+                    :class="tileFilter === 'yellow' ? 'ring-2 ring-amber-300 bg-amber-50' : 'hover:bg-slate-50'">
+                    <div class="w-9 h-9 rounded-xl bg-amber-100 flex items-center justify-center">
+                        <svg class="w-4 h-4 text-amber-700" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M8 7h12m0 0l-4-4m4 4l-4 4m0 6H4m0 0l4 4m-4-4l4-4" /></svg>
+                    </div>
+                    <div class="text-left">
+                        <p class="text-[10px] font-black text-slate-400 uppercase tracking-wider">Exchange / IXP</p>
+                        <p class="text-lg font-black text-amber-700 leading-tight" x-text="summary?.upstream_count || 0"></p>
+                    </div>
+                </button>
+
+                <div class="w-px h-10 bg-slate-200"></div>
+
+                <button @click="tileFilter = tileFilter === 'red' ? '' : 'red'"
+                    class="flex items-center gap-2 rounded-xl px-2 py-1 -mx-2 transition-all cursor-pointer"
+                    :class="tileFilter === 'red' ? 'ring-2 ring-red-300 bg-red-50' : 'hover:bg-slate-50'">
+                    <div class="w-9 h-9 rounded-xl bg-red-100 flex items-center justify-center">
+                        <svg class="w-4 h-4 text-red-600" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 11H5m14 0a2 2 0 012 2v6a2 2 0 01-2 2H5a2 2 0 01-2-2v-6a2 2 0 012-2m14 0V9a2 2 0 00-2-2M5 11V9a2 2 0 012-2m0 0V5a2 2 0 012-2h6a2 2 0 012 2v2M7 7h10" /></svg>
+                    </div>
+                    <div class="text-left">
                         <p class="text-[10px] font-black text-slate-400 uppercase tracking-wider">Upstream Transit</p>
-                        <p class="text-lg font-black text-emerald-600 leading-tight" x-text="summary?.content_count || 0"></p>
+                        <p class="text-lg font-black text-red-600 leading-tight" x-text="summary?.content_count || 0"></p>
+                    </div>
+                </button>
+            </div>
+
+            <!-- Filtered network badge grid -->
+            <div x-show="tileFilter" x-transition class="border-t border-slate-100 px-6 py-4">
+                <div class="flex items-center justify-between mb-3">
+                    <div class="flex items-center gap-3">
+                        <p class="text-[10px] font-black text-slate-400 uppercase tracking-wider" x-text="tileFilterLabel"></p>
+                        <span class="text-[10px] font-bold text-slate-300" x-text="filteredBadgeNetworks.length + ' networks'"></span>
+                    </div>
+                    <div class="relative w-64">
+                        <input type="text" x-model="searchQuery" placeholder="Search ASN or Provider..."
+                            class="w-full pl-8 pr-3 py-1.5 bg-slate-50 border border-slate-200 rounded-lg text-xs focus:ring-2 focus:ring-[#00A9E0]/20 focus:border-[#00A9E0] outline-none">
+                        <svg class="w-3.5 h-3.5 absolute left-2.5 top-1/2 -translate-y-1/2 text-slate-300" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z"/></svg>
                     </div>
                 </div>
-
-                <!-- Direct peer badges -->
-                <template x-if="summary?.direct_peers?.length > 0">
-                    <div class="w-full mt-3 border-t border-slate-100 pt-3">
-                        <p class="text-[10px] font-black text-slate-400 uppercase tracking-wider mb-2">Direct On-Net Peers</p>
-                        <div class="grid grid-cols-3 gap-2">
-                            <template x-for="dp in summary.direct_peers" :key="dp.asn">
-                                <span class="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-full bg-amber-50 border border-amber-200 text-xs font-bold text-amber-800 truncate">
-                                    <span class="w-1.5 h-1.5 rounded-full bg-amber-400 flex-shrink-0"></span>
-                                    <span x-text="dp.name" class="truncate"></span>
-                                    <span class="text-amber-500 font-mono text-[10px] flex-shrink-0" x-text="'AS' + dp.asn"></span>
-                                </span>
-                            </template>
-                        </div>
-                    </div>
-                </template>
+                <div class="grid grid-cols-3 gap-2">
+                    <template x-for="net in filteredBadgeNetworks" :key="net.asn">
+                        <a :href="'https://www.peeringdb.com/asn/' + net.asn" target="_blank"
+                            class="inline-flex items-center gap-1.5 px-3 py-2 rounded-xl border text-xs font-bold truncate hover:shadow-sm transition-all"
+                            :class="badgeClasses(net)">
+                            <span class="w-2 h-2 rounded-full flex-shrink-0" :class="dotClass(net)"></span>
+                            <span x-text="net.name" class="truncate"></span>
+                            <span class="font-mono text-[10px] flex-shrink-0 opacity-50" x-text="'AS' + net.asn"></span>
+                        </a>
+                    </template>
+                </div>
+                <div x-show="filteredBadgeNetworks.length === 0" class="text-center py-6 text-slate-400 text-xs italic">No networks match your search.</div>
             </div>
         </div>
 
-        <!-- Result Table Container -->
-        <div class="flex-1 min-h-0 bg-white rounded-3xl border border-slate-200 shadow-xl shadow-slate-200/50 flex flex-col overflow-hidden">
-            <!-- Table Action Bar -->
-            <div class="px-6 py-3 bg-slate-50/50 border-b border-slate-100 flex flex-col gap-2">
-                <div class="flex flex-col md:flex-row justify-between items-center gap-3">
-                    <div class="flex items-center gap-4">
-                        <div x-show="loading" class="w-5 h-5 border-2 border-[#00205B] border-t-transparent rounded-full animate-spin"></div>
-                        <div class="flex flex-col">
-                            <h2 class="text-sm font-black text-[#00205B]" x-text="tableTitle"></h2>
-                            <p class="text-[11px] text-slate-400 font-medium" x-text="networks.length ? 'Found ' + networks.length + ' unique networks' : 'Selection required'"></p>
-                        </div>
-                    </div>
-
-                    <div class="relative w-full md:w-80">
-                        <input
-                            type="text"
-                            x-model="searchQuery"
-                            placeholder="Search ASN or Provider..."
-                            class="w-full pl-10 pr-4 py-2 bg-white border border-slate-200 rounded-xl text-sm focus:ring-4 focus:ring-[#00A9E0]/10 focus:border-[#00A9E0] outline-none transition-all shadow-inner"
-                        >
-                        <svg class="w-5 h-5 absolute left-4 top-1/2 -translate-y-1/2 text-slate-300" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z" /></svg>
-                    </div>
+        <!-- Empty State -->
+        <div x-show="!scopeId && !loading" class="flex-1 flex items-center justify-center py-20">
+            <div class="max-w-sm text-center">
+                <div class="w-16 h-16 bg-slate-100 rounded-3xl flex items-center justify-center mx-auto mb-6">
+                    <svg class="w-8 h-8 text-slate-400" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z" /></svg>
                 </div>
-
-                <!-- Health Status Filters -->
-                <div x-show="networks.length > 0" class="flex items-center gap-3">
-                    <span class="text-[10px] font-black text-slate-400 uppercase tracking-wider">Path Quality</span>
-                    <button
-                        @click="healthFilter = healthFilter === 'green' ? '' : 'green'"
-                        class="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-full text-[10px] font-bold uppercase tracking-wider border transition-all"
-                        :class="healthFilter === 'green' ? 'bg-emerald-500 text-white border-emerald-500 shadow-lg' : 'bg-white text-emerald-700 border-emerald-200 hover:bg-emerald-50'"
-                    >
-                        <span class="w-2 h-2 rounded-full" :class="healthFilter === 'green' ? 'bg-white' : 'bg-emerald-400'"></span>
-                        Direct On-Net
-                    </button>
-                    <button
-                        @click="healthFilter = healthFilter === 'yellow' ? '' : 'yellow'"
-                        class="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-full text-[10px] font-bold uppercase tracking-wider border transition-all"
-                        :class="healthFilter === 'yellow' ? 'bg-amber-500 text-white border-amber-500 shadow-lg' : 'bg-white text-amber-700 border-amber-200 hover:bg-amber-50'"
-                    >
-                        <span class="w-2 h-2 rounded-full" :class="healthFilter === 'yellow' ? 'bg-white' : 'bg-amber-400'"></span>
-                        Exchange / IXP
-                    </button>
-                    <button
-                        @click="healthFilter = healthFilter === 'red' ? '' : 'red'"
-                        class="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-full text-[10px] font-bold uppercase tracking-wider border transition-all"
-                        :class="healthFilter === 'red' ? 'bg-red-500 text-white border-red-500 shadow-lg' : 'bg-white text-red-700 border-red-200 hover:bg-red-50'"
-                    >
-                        <span class="w-2 h-2 rounded-full" :class="healthFilter === 'red' ? 'bg-white' : 'bg-red-400'"></span>
-                        Upstream Transit
-                    </button>
-                    <button
-                        x-show="healthFilter"
-                        @click="healthFilter = ''"
-                        class="text-[10px] font-bold text-slate-400 hover:text-slate-600 uppercase tracking-wider ml-1"
-                    >Clear</button>
-                </div>
-            </div>
-
-            <!-- Table UI -->
-            <div class="flex-1 overflow-auto custom-scrollbar">
-                <table class="w-full text-left">
-                    <thead class="sticky top-0 bg-white/95 backdrop-blur z-10">
-                        <tr class="text-[10px] font-black text-slate-400 uppercase tracking-[0.2em] border-b border-slate-100">
-                            <th class="pl-5 pr-2 py-3 w-10"></th>
-                            <th class="px-3 py-3">ASN</th>
-                            <th class="px-3 py-3">Network Name</th>
-                            <th class="px-3 py-3">Info Type</th>
-                            <template x-if="viewMode !== 'upstream'">
-                                <th class="px-3 py-3">Traffic Level</th>
-                            </template>
-                            <th class="px-3 py-3">Peering Policy</th>
-                            <th class="px-3 py-3 text-right pr-6">DB</th>
-                        </tr>
-                    </thead>
-                    <tbody>
-                        <template x-for="net in filteredNetworks" :key="net.asn">
-                            <tr>
-                                <td colspan="7" class="p-0">
-                                    <table class="w-full">
-                                        <tr @click="toggleRow(net.asn)" class="hover:bg-slate-50/50 transition-all group cursor-pointer border-b border-slate-50">
-                                            <td class="pl-5 pr-2 py-3 w-10">
-                                                <div class="flex items-center gap-2">
-                                                    <span class="w-2.5 h-2.5 rounded-full flex-shrink-0"
-                                                          :class="getHealth(net) === 'green' ? 'bg-emerald-400' : getHealth(net) === 'yellow' ? 'bg-amber-400' : 'bg-red-400'"></span>
-                                                    <svg class="w-4 h-4 text-slate-400 transition-transform" :class="expandedRow === net.asn ? 'rotate-90' : ''" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 5l7 7-7 7" /></svg>
-                                                </div>
-                                            </td>
-                                            <td class="px-3 py-3">
-                                                <span class="font-mono font-black text-[#00A9E0] bg-blue-50 px-2 py-0.5 rounded-lg text-xs">AS<span x-text="net.asn"></span></span>
-                                            </td>
-                                            <td class="px-3 py-3">
-                                                <div class="font-bold text-sm text-[#00205B] group-hover:text-[#00A9E0] transition-colors" x-text="net.name"></div>
-                                            </td>
-                                            <td class="px-3 py-3">
-                                                <span
-                                                    class="px-2.5 py-0.5 rounded-full text-[10px] font-black uppercase tracking-wider"
-                                                    :class="net.info_type === 'NSP' ? 'bg-amber-100 text-amber-700' : 'bg-emerald-100 text-emerald-700'"
-                                                    x-text="net.info_type"
-                                                ></span>
-                                            </td>
-                                            <template x-if="viewMode !== 'upstream'">
-                                                <td class="px-3 py-3">
-                                                    <div class="text-xs font-bold text-slate-600" x-text="net.traffic_range"></div>
-                                                </td>
-                                            </template>
-                                            <td class="px-3 py-3">
-                                                <p class="text-xs text-slate-500 font-medium leading-relaxed max-w-xs" x-text="net.policy"></p>
-                                            </td>
-                                            <td class="px-3 py-3 text-right pr-6">
-                                                <a :href="'https://www.peeringdb.com/asn/' + net.asn" target="_blank" @click.stop class="text-slate-300 hover:text-[#00A9E0]">
-                                                    <svg class="w-5 h-5 inline" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M10 6H6a2 2 0 00-2 2v10a2 2 0 002 2h10a2 2 0 002-2v-4M14 4h6m0 0v6m0-6L10 14" /></svg>
-                                                </a>
-                                            </td>
-                                        </tr>
-                                        <!-- Expandable Detail Row -->
-                                        <tr x-show="expandedRow === net.asn" x-transition class="bg-slate-50/80">
-                                            <td colspan="7" class="px-6 py-3">
-                                                <div class="grid grid-cols-3 gap-6 text-sm">
-                                                    <div>
-                                                        <p class="text-[10px] font-black text-slate-400 uppercase tracking-wider mb-1">Health Status</p>
-                                                        <span class="inline-flex items-center gap-1.5 text-xs font-bold"
-                                                              :class="getHealth(net) === 'green' ? 'text-emerald-600' : getHealth(net) === 'yellow' ? 'text-amber-600' : 'text-red-600'">
-                                                            <span class="w-2 h-2 rounded-full"
-                                                                  :class="getHealth(net) === 'green' ? 'bg-emerald-400' : getHealth(net) === 'yellow' ? 'bg-amber-400' : 'bg-red-400'"></span>
-                                                            <span x-text="getHealth(net) === 'green' ? 'Direct On-Net Path' : getHealth(net) === 'yellow' ? 'Exchange / IXP Path' : 'Upstream Transit Path'"></span>
-                                                        </span>
-                                                    </div>
-                                                    <div>
-                                                        <p class="text-[10px] font-black text-slate-400 uppercase tracking-wider mb-1">Next QBR</p>
-                                                        <span class="text-xs font-bold text-slate-600">--</span>
-                                                    </div>
-                                                    <div>
-                                                        <p class="text-[10px] font-black text-slate-400 uppercase tracking-wider mb-1">PeeringDB Profile</p>
-                                                        <a :href="'https://www.peeringdb.com/asn/' + net.asn" target="_blank" class="text-xs font-bold text-[#00A9E0] hover:underline" x-text="'peeringdb.com/asn/' + net.asn"></a>
-                                                    </div>
-                                                </div>
-                                            </td>
-                                        </tr>
-                                    </table>
-                                </td>
-                            </tr>
-                        </template>
-
-                        <!-- Empty States -->
-                        <tr x-show="!scopeId">
-                            <td colspan="7" class="px-8 py-20 text-center">
-                                <div class="max-w-sm mx-auto">
-                                    <div class="w-16 h-16 bg-slate-100 rounded-3xl flex items-center justify-center mx-auto mb-6">
-                                        <svg class="w-8 h-8 text-slate-400" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z" /></svg>
-                                    </div>
-                                    <h3 class="text-xl font-black text-slate-700">Scope Pending</h3>
-                                    <p class="text-sm text-slate-400 mt-2 font-medium">Select a global market or individual data center facility from the sidebar to begin auditing.</p>
-                                </div>
-                            </td>
-                        </tr>
-                        <tr x-show="scopeId && filteredNetworks.length === 0 && !loading">
-                            <td colspan="7" class="px-8 py-20 text-center text-slate-400 italic font-medium">
-                                No networks found in this category for the current selection.
-                            </td>
-                        </tr>
-                    </tbody>
-                </table>
+                <h3 class="text-xl font-black text-slate-700">Scope Pending</h3>
+                <p class="text-sm text-slate-400 mt-2 font-medium">Select a global market or individual data center facility from the sidebar to begin auditing.</p>
             </div>
         </div>
 
-        <footer class="flex-shrink-0 flex justify-between items-center text-[10px] font-black text-slate-400 uppercase tracking-[0.3em] py-2">
+        <footer class="flex-shrink-0 flex justify-between items-center text-[10px] font-black text-slate-400 uppercase tracking-[0.3em] py-2 mt-auto">
             <p>Source: PeeringDB API</p>
             <p>&copy; Zenlayer Global Operations</p>
         </footer>
@@ -399,8 +269,7 @@
                 searchQuery: '',
                 loading: false,
                 summary: null,
-                healthFilter: '',
-                expandedRow: null,
+                tileFilter: '',
 
                 get filteredFacilities() {
                     if (!this.selectedCity) return [];
@@ -423,10 +292,10 @@
                     return 'red';
                 },
 
-                get filteredNetworks() {
+                get filteredBadgeNetworks() {
                     let nets = this.networks;
-                    if (this.healthFilter) {
-                        nets = nets.filter(n => this.getHealth(n) === this.healthFilter);
+                    if (this.tileFilter && this.tileFilter !== 'all') {
+                        nets = nets.filter(n => this.getHealth(n) === this.tileFilter);
                     }
                     if (this.searchQuery) {
                         const q = this.searchQuery.toLowerCase();
@@ -438,14 +307,28 @@
                     return nets;
                 },
 
+                get tileFilterLabel() {
+                    const labels = { all: 'All Networks', green: 'Direct Peers', yellow: 'Exchange / IXP Networks', red: 'Upstream Transit Networks' };
+                    return labels[this.tileFilter] || '';
+                },
+
+                badgeClasses(net) {
+                    const h = this.getHealth(net);
+                    if (h === 'green') return 'bg-emerald-50 border-emerald-200 text-emerald-800';
+                    if (h === 'yellow') return 'bg-amber-50 border-amber-200 text-amber-800';
+                    return 'bg-red-50 border-red-200 text-red-800';
+                },
+
+                dotClass(net) {
+                    const h = this.getHealth(net);
+                    if (h === 'green') return 'bg-emerald-400';
+                    if (h === 'yellow') return 'bg-amber-400';
+                    return 'bg-red-400';
+                },
+
                 get viewModeLabel() {
                     const labels = { 'upstream': 'Upstream Providers', 'peers': 'Content & Peers', 'all': 'Global Networks' };
                     return labels[this.viewMode];
-                },
-
-                get tableTitle() {
-                    const titles = { 'upstream': 'Aggregated Upstream Providers', 'peers': 'Content & Peer Identification', 'all': 'Complete Network Presence' };
-                    return titles[this.viewMode];
                 },
 
                 onCitySelected() {
@@ -469,13 +352,11 @@
                     await this.refreshData();
                 },
 
-                toggleRow(asn) {
-                    this.expandedRow = this.expandedRow === asn ? null : asn;
-                },
-
                 setMode(mode) {
                     if (this.viewMode === mode) return;
                     this.viewMode = mode;
+                    this.tileFilter = '';
+                    this.searchQuery = '';
                     if (this.scopeId) {
                         this.refreshData();
                     }
@@ -492,7 +373,8 @@
                 async refreshData() {
                     this.loading = true;
                     this.networks = [];
-                    this.expandedRow = null;
+                    this.tileFilter = '';
+                    this.searchQuery = '';
                     try {
                         let url = `/audit/api/discover?category=${this.viewMode}`;
                         let summaryUrl = `/audit/api/discover/summary?`;
