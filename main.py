@@ -472,16 +472,17 @@ async def discover_summary(
 
         ix_member_asns: set = set()
         zl_ix_ids: set = set()
-        for nid in zenlayer_net_ids:
-            for rec in fetch_peeringdb(f"netixlan?net_id={nid}"):
+        if zenlayer_net_ids:
+            net_id_query = ",".join(map(str, zenlayer_net_ids))
+            for rec in fetch_peeringdb(f"netixlan?net_id__in={net_id_query}"):
                 if rec.get("ix_id"):
                     zl_ix_ids.add(rec["ix_id"])
 
         if zl_ix_ids:
-            for ix_id in zl_ix_ids:
-                for rec in fetch_peeringdb(f"netixlan?ix_id={ix_id}"):
-                    if rec.get("asn"):
-                        ix_member_asns.add(rec["asn"])
+            ix_query = ",".join(map(str, zl_ix_ids))
+            for rec in fetch_peeringdb(f"netixlan?ix_id__in={ix_query}"):
+                if rec.get("asn"):
+                    ix_member_asns.add(rec["asn"])
 
         ix_member_asns -= local_set
         ix_member_asns -= direct_at_facility
@@ -582,10 +583,11 @@ async def get_routing_flow(
         # ==================================================================
         zenlayer_net_ids = [n["id"] for n in zenlayer_state.get("networks", [])]
 
-        # All IXes where Zenlayer has a port
+        # All IXes where Zenlayer has a port (batched query)
         zl_ix_ids: set = set()
-        for nid in zenlayer_net_ids:
-            for rec in fetch_peeringdb(f"netixlan?net_id={nid}"):
+        if zenlayer_net_ids:
+            net_id_query = ",".join(map(str, zenlayer_net_ids))
+            for rec in fetch_peeringdb(f"netixlan?net_id__in={net_id_query}"):
                 ix_id = rec.get("ix_id")
                 if ix_id:
                     zl_ix_ids.add(ix_id)
@@ -595,17 +597,18 @@ async def get_routing_flow(
         ix_member_asns: set = set()
         asn_to_shared_ixes: Dict[int, List[int]] = {}
         if zl_ix_ids:
-            ix_data = fetch_peeringdb(
-                f"ix?id__in={','.join(map(str, zl_ix_ids))}"
-            )
+            ix_query = ",".join(map(str, zl_ix_ids))
+            ix_data = fetch_peeringdb(f"ix?id__in={ix_query}")
             for ix in ix_data:
                 ix_names[ix["id"]] = ix.get("name", f"IX-{ix['id']}")
 
-            for ix_id in zl_ix_ids:
-                for rec in fetch_peeringdb(f"netixlan?ix_id={ix_id}"):
-                    asn = rec.get("asn")
-                    if asn and asn not in local_set:
-                        ix_member_asns.add(asn)
+            # Single batched query for all IX members
+            for rec in fetch_peeringdb(f"netixlan?ix_id__in={ix_query}"):
+                asn = rec.get("asn")
+                ix_id = rec.get("ix_id")
+                if asn and asn not in local_set:
+                    ix_member_asns.add(asn)
+                    if ix_id:
                         asn_to_shared_ixes.setdefault(asn, []).append(ix_id)
 
         # ==================================================================
