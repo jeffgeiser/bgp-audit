@@ -638,10 +638,18 @@ async def get_routing_flow(
 
         facility_direct = direct_peer_asns & facility_asn_set
 
+        # IX members at the facility that are NOT direct BGP peers —
+        # protect them from being absorbed as downstream children so
+        # they appear as their own Level 1 Exchange/IXP nodes.
+        ix_facility_set = (ix_member_asns & facility_asn_set) - facility_direct - local_set
+
         print(
             f"[RoutingFlow] {location}: "
             f"{len(facility_direct)} direct peers at facility "
-            f"(of {len(direct_peer_asns)} global)"
+            f"(of {len(direct_peer_asns)} global), "
+            f"{len(zenlayer_local_ixes)} shared IXes, "
+            f"{len(ix_member_asns)} IX member ASNs, "
+            f"{len(ix_facility_set)} IX members at facility"
         )
 
         # ------------------------------------------------------------------
@@ -660,7 +668,7 @@ async def get_routing_flow(
 
             children = []
             for d_asn in sorted(downstream_at_fac):
-                if d_asn in assigned_asns or d_asn == hop_asn:
+                if d_asn in assigned_asns or d_asn == hop_asn or d_asn in ix_facility_set:
                     continue
                 d_net = facility_nets.get(d_asn)
                 if d_net:
@@ -718,7 +726,7 @@ async def get_routing_flow(
             )
             children = []
             for d_asn in sorted(downstream_at_fac):
-                if d_asn in assigned_asns or d_asn == hop_asn:
+                if d_asn in assigned_asns or d_asn == hop_asn or d_asn in ix_facility_set:
                     continue
                 d_net = facility_nets.get(d_asn)
                 if d_net:
@@ -807,14 +815,18 @@ async def get_routing_flow(
                     transit_nested += 1
                     break
 
-        # Truly unresolved: assign round-robin to the peer with the most
+        # Truly unresolved: assign round-robin to the peer with the fewest
         # existing children so they don't sit as orphan top-level nodes.
-        if remaining_asns and direct_peer_nodes:
+        # Skip Exchange/IXP-only nodes (they have no routing relationship).
+        routable_peers = [
+            p for p in direct_peer_nodes.values()
+            if p["category"] != "Exchange/IXP"
+        ]
+        if remaining_asns and routable_peers:
             for u_asn in sorted(remaining_asns):
                 u_net = facility_nets[u_asn]
-                # Pick peer with fewest children to balance load
                 target_peer = min(
-                    direct_peer_nodes.values(),
+                    routable_peers,
                     key=lambda p: len(p["children"]),
                 )
                 target_peer["children"].append({
