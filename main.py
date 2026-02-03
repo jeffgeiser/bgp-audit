@@ -464,82 +464,34 @@ async def discover_summary(
             for n in all_nets if n["asn"] in direct_at_facility
         ]
 
-        # ----- IX detection: city-based + facility-based (union) -----
-        target_fac_ids = []
-        target_cities_lower: set = set()
-        if fac_id:
-            target_fac_ids = [fac_id]
-            # Resolve city from facility
-            for f in zenlayer_state["facilities"]:
-                if f["id"] == fac_id and f.get("city"):
-                    target_cities_lower.add(f["city"].lower())
-        elif location:
-            if location_type == "city":
-                target_fac_ids = [
-                    f["id"] for f in zenlayer_state["facilities"]
-                    if f.get("city") == location
-                ]
-                target_cities_lower.add(location.lower())
-            else:
-                mapping = config.get("METRO_MAP", {})
-                cities = [c for c, m in mapping.items() if m == location]
-                target_fac_ids = [
-                    f["id"] for f in zenlayer_state["facilities"]
-                    if f.get("city") in cities
-                ]
-                target_cities_lower = {c.lower() for c in cities}
+        # ----- IX detection: use ALL Zenlayer IXes -----
+        # Locality is enforced by intersecting with facility_asns below
+        zenlayer_net_ids = [
+            n["id"] for n in zenlayer_state.get("networks", [])
+        ]
 
         ix_member_asns: set = set()
-        if target_fac_ids or target_cities_lower:
-            zenlayer_net_ids = [
-                n["id"] for n in zenlayer_state.get("networks", [])
-            ]
+        zl_ix_ids: set = set()
+        for nid in zenlayer_net_ids:
+            for rec in fetch_peeringdb(f"netixlan?net_id={nid}"):
+                if rec.get("ix_id"):
+                    zl_ix_ids.add(rec["ix_id"])
 
-            # Facility-based IX detection
-            fac_ix_ids: set = set()
-            if target_fac_ids:
-                fac_query = ",".join(map(str, target_fac_ids))
-                ix_at_facs = fetch_peeringdb(f"ixfac?fac_id__in={fac_query}")
-                fac_ix_ids = {
-                    ix.get("ix_id") for ix in ix_at_facs if ix.get("ix_id")
-                }
+        if zl_ix_ids:
+            for ix_id in zl_ix_ids:
+                for rec in fetch_peeringdb(f"netixlan?ix_id={ix_id}"):
+                    if rec.get("asn"):
+                        ix_member_asns.add(rec["asn"])
 
-            # All IXes where Zenlayer has a port
-            zl_ix_ids: set = set()
-            for nid in zenlayer_net_ids:
-                for rec in fetch_peeringdb(f"netixlan?net_id={nid}"):
-                    if rec.get("ix_id"):
-                        zl_ix_ids.add(rec["ix_id"])
+        ix_member_asns -= local_set
+        ix_member_asns -= direct_at_facility
 
-            # City-based: Zenlayer IXes whose city matches the target
-            city_matched_ix_ids: set = set()
-            if zl_ix_ids and target_cities_lower:
-                ix_data = fetch_peeringdb(
-                    f"ix?id__in={','.join(map(str, zl_ix_ids))}"
-                )
-                for ix in ix_data:
-                    ix_city = (ix.get("city") or "").strip().lower()
-                    if ix_city and ix_city in target_cities_lower:
-                        city_matched_ix_ids.add(ix["id"])
-
-            # Union: facility-based ∩ Zenlayer + city-matched
-            shared_ixes = (fac_ix_ids & zl_ix_ids) | city_matched_ix_ids
-
-            if shared_ixes:
-                for ix_id in shared_ixes:
-                    for rec in fetch_peeringdb(f"netixlan?ix_id={ix_id}"):
-                        if rec.get("asn"):
-                            ix_member_asns.add(rec["asn"])
-
-            ix_member_asns -= local_set
-            ix_member_asns -= direct_at_facility
-
-            print(
-                f"[Summary] {location}: "
-                f"{len(shared_ixes)} local IXes "
-                f"(fac={len(fac_ix_ids & zl_ix_ids)}, city={len(city_matched_ix_ids)}), "
-                f"{len(ix_member_asns)} IX member ASNs"
-            )
+        print(
+            f"[Summary] {location}: "
+            f"{len(zl_ix_ids)} Zenlayer IXes, "
+            f"{len(ix_member_asns)} IX member ASNs, "
+            f"{len(ix_member_asns & facility_asns)} IX members at facility"
+        )
 
         exchange_ixp_at_facility = facility_asns & ix_member_asns
         transit_at_facility = (
@@ -593,15 +545,12 @@ async def get_routing_flow(
 
         # Get facilities for this location
         target_fac_ids = []
-        target_cities_lower: set = set()
         if location_type == "city":
             target_fac_ids = [f["id"] for f in zenlayer_state["facilities"] if f.get("city") == location]
-            target_cities_lower.add(location.lower())
         else:
             mapping = config.get("METRO_MAP", {})
             cities_in_metro = [city for city, m in mapping.items() if m == location]
             target_fac_ids = [f["id"] for f in zenlayer_state["facilities"] if f.get("city") in cities_in_metro]
-            target_cities_lower = {c.lower() for c in cities_in_metro}
 
         if not target_fac_ids:
             return {"error": "No facilities found for location"}
@@ -628,15 +577,12 @@ async def get_routing_flow(
         facility_asn_set = set(facility_nets.keys())
 
         # ==================================================================
-        # IX Detection — city-based + facility-based (union)
+        # IX Detection — use ALL Zenlayer IXes; locality is enforced by
+        # the facility_asn_set intersection in Phase 1
         # ==================================================================
         zenlayer_net_ids = [n["id"] for n in zenlayer_state.get("networks", [])]
 
-        # 1) Facility-based: IXes physically at Zenlayer's facilities
-        ix_at_facs = fetch_peeringdb(f"ixfac?fac_id__in={fac_query}")
-        fac_ix_ids = {ix.get("ix_id") for ix in ix_at_facs if ix.get("ix_id")}
-
-        # 2) All IXes where Zenlayer has a port
+        # All IXes where Zenlayer has a port
         zl_ix_ids: set = set()
         for nid in zenlayer_net_ids:
             for rec in fetch_peeringdb(f"netixlan?net_id={nid}"):
@@ -644,32 +590,18 @@ async def get_routing_flow(
                 if ix_id:
                     zl_ix_ids.add(ix_id)
 
-        # 3) City-based: Zenlayer IXes whose city matches the target
-        city_matched_ix_ids: set = set()
+        # Build IX names and comprehensive member set from ALL Zenlayer IXes
+        ix_names: Dict[int, str] = {}
+        ix_member_asns: set = set()
+        asn_to_shared_ixes: Dict[int, List[int]] = {}
         if zl_ix_ids:
             ix_data = fetch_peeringdb(
                 f"ix?id__in={','.join(map(str, zl_ix_ids))}"
             )
             for ix in ix_data:
-                ix_city = (ix.get("city") or "").strip().lower()
-                if ix_city and ix_city in target_cities_lower:
-                    city_matched_ix_ids.add(ix["id"])
-
-        # Union: facility-based ∩ Zenlayer membership + city-matched
-        zenlayer_local_ixes = (fac_ix_ids & zl_ix_ids) | city_matched_ix_ids
-
-        # Build IX names and comprehensive member set
-        ix_names: Dict[int, str] = {}
-        ix_member_asns: set = set()
-        asn_to_shared_ixes: Dict[int, List[int]] = {}
-        if zenlayer_local_ixes:
-            name_data = fetch_peeringdb(
-                f"ix?id__in={','.join(map(str, zenlayer_local_ixes))}"
-            )
-            for ix in name_data:
                 ix_names[ix["id"]] = ix.get("name", f"IX-{ix['id']}")
 
-            for ix_id in zenlayer_local_ixes:
+            for ix_id in zl_ix_ids:
                 for rec in fetch_peeringdb(f"netixlan?ix_id={ix_id}"):
                     asn = rec.get("asn")
                     if asn and asn not in local_set:
@@ -687,8 +619,7 @@ async def get_routing_flow(
         print(
             f"[RoutingFlow] {location}: "
             f"{len(facility_direct)} direct peers at facility, "
-            f"{len(zenlayer_local_ixes)} local IXes "
-            f"(fac={len(fac_ix_ids & zl_ix_ids)}, city={len(city_matched_ix_ids)}), "
+            f"{len(zl_ix_ids)} Zenlayer IXes, "
             f"{len(ix_member_asns)} IX member ASNs, "
             f"{len(ix_member_asns & facility_asn_set)} IX members at facility"
         )
