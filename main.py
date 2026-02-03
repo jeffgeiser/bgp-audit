@@ -464,16 +464,22 @@ async def discover_summary(
             for n in all_nets if n["asn"] in direct_at_facility
         ]
 
-        # ----- IX detection for Exchange/IXP classification -----
+        # ----- IX detection: city-based + facility-based (union) -----
         target_fac_ids = []
+        target_cities_lower: set = set()
         if fac_id:
             target_fac_ids = [fac_id]
+            # Resolve city from facility
+            for f in zenlayer_state["facilities"]:
+                if f["id"] == fac_id and f.get("city"):
+                    target_cities_lower.add(f["city"].lower())
         elif location:
             if location_type == "city":
                 target_fac_ids = [
                     f["id"] for f in zenlayer_state["facilities"]
                     if f.get("city") == location
                 ]
+                target_cities_lower.add(location.lower())
             else:
                 mapping = config.get("METRO_MAP", {})
                 cities = [c for c, m in mapping.items() if m == location]
@@ -481,25 +487,44 @@ async def discover_summary(
                     f["id"] for f in zenlayer_state["facilities"]
                     if f.get("city") in cities
                 ]
+                target_cities_lower = {c.lower() for c in cities}
 
         ix_member_asns: set = set()
-        if target_fac_ids:
-            fac_query = ",".join(map(str, target_fac_ids))
-            ix_at_facs = fetch_peeringdb(f"ixfac?fac_id__in={fac_query}")
-            local_ix_ids = {
-                ix.get("ix_id") for ix in ix_at_facs if ix.get("ix_id")
-            }
-
+        if target_fac_ids or target_cities_lower:
             zenlayer_net_ids = [
                 n["id"] for n in zenlayer_state.get("networks", [])
             ]
+
+            # Facility-based IX detection
+            fac_ix_ids: set = set()
+            if target_fac_ids:
+                fac_query = ",".join(map(str, target_fac_ids))
+                ix_at_facs = fetch_peeringdb(f"ixfac?fac_id__in={fac_query}")
+                fac_ix_ids = {
+                    ix.get("ix_id") for ix in ix_at_facs if ix.get("ix_id")
+                }
+
+            # All IXes where Zenlayer has a port
             zl_ix_ids: set = set()
             for nid in zenlayer_net_ids:
                 for rec in fetch_peeringdb(f"netixlan?net_id={nid}"):
                     if rec.get("ix_id"):
                         zl_ix_ids.add(rec["ix_id"])
 
-            shared_ixes = local_ix_ids & zl_ix_ids
+            # City-based: Zenlayer IXes whose city matches the target
+            city_matched_ix_ids: set = set()
+            if zl_ix_ids and target_cities_lower:
+                ix_data = fetch_peeringdb(
+                    f"ix?id__in={','.join(map(str, zl_ix_ids))}"
+                )
+                for ix in ix_data:
+                    ix_city = (ix.get("city") or "").strip().lower()
+                    if ix_city and ix_city in target_cities_lower:
+                        city_matched_ix_ids.add(ix["id"])
+
+            # Union: facility-based ∩ Zenlayer + city-matched
+            shared_ixes = (fac_ix_ids & zl_ix_ids) | city_matched_ix_ids
+
             if shared_ixes:
                 for ix_id in shared_ixes:
                     for rec in fetch_peeringdb(f"netixlan?ix_id={ix_id}"):
@@ -508,6 +533,13 @@ async def discover_summary(
 
             ix_member_asns -= local_set
             ix_member_asns -= direct_at_facility
+
+            print(
+                f"[Summary] {location}: "
+                f"{len(shared_ixes)} local IXes "
+                f"(fac={len(fac_ix_ids & zl_ix_ids)}, city={len(city_matched_ix_ids)}), "
+                f"{len(ix_member_asns)} IX member ASNs"
+            )
 
         exchange_ixp_at_facility = facility_asns & ix_member_asns
         transit_at_facility = (
@@ -561,12 +593,15 @@ async def get_routing_flow(
 
         # Get facilities for this location
         target_fac_ids = []
+        target_cities_lower: set = set()
         if location_type == "city":
             target_fac_ids = [f["id"] for f in zenlayer_state["facilities"] if f.get("city") == location]
+            target_cities_lower.add(location.lower())
         else:
             mapping = config.get("METRO_MAP", {})
             cities_in_metro = [city for city, m in mapping.items() if m == location]
             target_fac_ids = [f["id"] for f in zenlayer_state["facilities"] if f.get("city") in cities_in_metro]
+            target_cities_lower = {c.lower() for c in cities_in_metro}
 
         if not target_fac_ids:
             return {"error": "No facilities found for location"}
@@ -592,34 +627,46 @@ async def get_routing_flow(
 
         facility_asn_set = set(facility_nets.keys())
 
-        # ------------------------------------------------------------------
-        # PeeringDB Verification: find IXes at these facilities so we can
-        # verify co-location for peers that share an IX with Zenlayer even
-        # if they are registered at a different facility.
-        # ------------------------------------------------------------------
+        # ==================================================================
+        # IX Detection — city-based + facility-based (union)
+        # ==================================================================
         zenlayer_net_ids = [n["id"] for n in zenlayer_state.get("networks", [])]
-        ix_at_facs = fetch_peeringdb(f"ixfac?fac_id__in={fac_query}")
-        local_ix_ids = set(ix.get("ix_id") for ix in ix_at_facs if ix.get("ix_id"))
 
+        # 1) Facility-based: IXes physically at Zenlayer's facilities
+        ix_at_facs = fetch_peeringdb(f"ixfac?fac_id__in={fac_query}")
+        fac_ix_ids = {ix.get("ix_id") for ix in ix_at_facs if ix.get("ix_id")}
+
+        # 2) All IXes where Zenlayer has a port
         zl_ix_ids: set = set()
         for nid in zenlayer_net_ids:
             for rec in fetch_peeringdb(f"netixlan?net_id={nid}"):
                 ix_id = rec.get("ix_id")
                 if ix_id:
                     zl_ix_ids.add(ix_id)
-        zenlayer_local_ixes = local_ix_ids & zl_ix_ids
 
-        # Build a lookup: {ix_id: ix_name}
+        # 3) City-based: Zenlayer IXes whose city matches the target
+        city_matched_ix_ids: set = set()
+        if zl_ix_ids:
+            ix_data = fetch_peeringdb(
+                f"ix?id__in={','.join(map(str, zl_ix_ids))}"
+            )
+            for ix in ix_data:
+                ix_city = (ix.get("city") or "").strip().lower()
+                if ix_city and ix_city in target_cities_lower:
+                    city_matched_ix_ids.add(ix["id"])
+
+        # Union: facility-based ∩ Zenlayer membership + city-matched
+        zenlayer_local_ixes = (fac_ix_ids & zl_ix_ids) | city_matched_ix_ids
+
+        # Build IX names and comprehensive member set
         ix_names: Dict[int, str] = {}
-        # Comprehensive IX member set & per-ASN mapping (no extra API calls
-        # later when adding facility IX members as Exchange/IXP nodes).
         ix_member_asns: set = set()
         asn_to_shared_ixes: Dict[int, List[int]] = {}
         if zenlayer_local_ixes:
-            ix_data = fetch_peeringdb(
+            name_data = fetch_peeringdb(
                 f"ix?id__in={','.join(map(str, zenlayer_local_ixes))}"
             )
-            for ix in ix_data:
+            for ix in name_data:
                 ix_names[ix["id"]] = ix.get("name", f"IX-{ix['id']}")
 
             for ix_id in zenlayer_local_ixes:
@@ -629,207 +676,189 @@ async def get_routing_flow(
                         ix_member_asns.add(asn)
                         asn_to_shared_ixes.setdefault(asn, []).append(ix_id)
 
-        # ------------------------------------------------------------------
+        # ==================================================================
         # AS-Path Frequency Analysis  (2 API calls per local ASN, cached)
-        # ------------------------------------------------------------------
+        # ==================================================================
         direct_peer_asns, peer_downstreams = _analyze_zenlayer_paths(
             zenlayer_asns
         )
-
         facility_direct = direct_peer_asns & facility_asn_set
-
-        # IX members at the facility that are NOT direct BGP peers —
-        # protect them from being absorbed as downstream children so
-        # they appear as their own Level 1 Exchange/IXP nodes.
-        ix_facility_set = (ix_member_asns & facility_asn_set) - facility_direct - local_set
 
         print(
             f"[RoutingFlow] {location}: "
-            f"{len(facility_direct)} direct peers at facility "
-            f"(of {len(direct_peer_asns)} global), "
-            f"{len(zenlayer_local_ixes)} shared IXes, "
+            f"{len(facility_direct)} direct peers at facility, "
+            f"{len(zenlayer_local_ixes)} local IXes "
+            f"(fac={len(fac_ix_ids & zl_ix_ids)}, city={len(city_matched_ix_ids)}), "
             f"{len(ix_member_asns)} IX member ASNs, "
-            f"{len(ix_facility_set)} IX members at facility"
+            f"{len(ix_member_asns & facility_asn_set)} IX members at facility"
         )
 
-        # ------------------------------------------------------------------
-        # Build Level 1 nodes  (Direct Peers)
-        # ------------------------------------------------------------------
-        direct_peer_nodes: Dict[int, dict] = {}
-        assigned_asns = set(local_set)
+        # ==================================================================
+        # PHASE 1 — Identity Reservations (no children yet)
+        #
+        # Classify every potential Level-1 node.  Reserved ASNs can NOT
+        # be claimed as Downstream/Transit children by other peers.
+        # ==================================================================
+        identity_map: Dict[int, str] = {}  # {asn: category}
 
-        for hop_asn in sorted(facility_direct):
-            net = facility_nets[hop_asn]
+        # Tier 1: Direct On-Net — BGP peers verified at the facility
+        for asn in facility_direct:
+            identity_map[asn] = "Direct Peer"
 
-            # Level 2: downstream ASNs via path analysis
-            downstream_at_fac = (
-                peer_downstreams.get(hop_asn, set()) & facility_asn_set
-            )
+        # Tier 2: Exchange/IXP — facility networks on shared IXes
+        for asn in (ix_member_asns & facility_asn_set) - local_set:
+            if asn not in identity_map:
+                identity_map[asn] = "Exchange/IXP"
 
-            children = []
-            for d_asn in sorted(downstream_at_fac):
-                if d_asn in assigned_asns or d_asn == hop_asn or d_asn in ix_facility_set:
-                    continue
-                d_net = facility_nets.get(d_asn)
-                if d_net:
-                    children.append({
-                        "asn": d_asn,
-                        "name": d_net.get("name", f"AS{d_asn}"),
-                        "info_type": d_net.get("info_type", ""),
-                        "is_direct": False,
-                        "category": "Downstream",
-                    })
-                    assigned_asns.add(d_asn)
-
-            children.sort(key=lambda x: x["name"])
-
-            # PeeringDB Verified – at the same facility
-            direct_peer_nodes[hop_asn] = {
-                "asn": hop_asn,
-                "name": net.get("name", f"AS{hop_asn}"),
-                "info_type": net.get("info_type", ""),
-                "is_direct": True,
-                "verified": True,
-                "verification": "PeeringDB Facility",
-                "category": "Direct Peer",
-                "children": children,
-            }
-            assigned_asns.add(hop_asn)
-
-        # External 1-Hop peers (direct peer globally but NOT at this
-        # facility).  Only promote to Level 1 if they share an IX with
-        # Zenlayer at this location (Exchange/IXP Path).  All others
-        # are skipped — their downstream networks will be caught by the
-        # transit distribution below.
+        # Tier 3: External 1-hop peers (not at facility)
         external_direct = direct_peer_asns - facility_asn_set - local_set
-        for hop_asn in sorted(external_direct):
-            # Lightweight IX membership check (cached)
-            verified = False
-            verification = "External 1-Hop"
-            shared_ix: List[str] = []
+        for hop_asn in external_direct:
+            if hop_asn not in identity_map:
+                if hop_asn in ix_member_asns:
+                    identity_map[hop_asn] = "Exchange/IXP"
+                else:
+                    identity_map[hop_asn] = "Upstream Transit"
 
-            peer_nets = fetch_peeringdb(f"net?asn={hop_asn}")
-            if peer_nets and zenlayer_local_ixes:
-                pnet_id = peer_nets[0]["id"]
-                peer_ixlans = fetch_peeringdb(f"netixlan?net_id={pnet_id}")
-                peer_ix_set = set(r.get("ix_id") for r in peer_ixlans)
-                common = peer_ix_set & zenlayer_local_ixes
-                if common:
-                    verified = True
-                    verification = "Shared IX"
-                    shared_ix = [ix_names.get(ix, f"IX-{ix}") for ix in common]
+        reserved_level_1 = set(identity_map.keys())
 
-            # Include all external 1-hop peers as Exchange/IXP Level 1 nodes
-            # Still include their downstream networks at the facility
-            downstream_at_fac = (
-                peer_downstreams.get(hop_asn, set()) & facility_asn_set
-            )
-            children = []
-            for d_asn in sorted(downstream_at_fac):
-                if d_asn in assigned_asns or d_asn == hop_asn or d_asn in ix_facility_set:
-                    continue
-                d_net = facility_nets.get(d_asn)
-                if d_net:
-                    children.append({
-                        "asn": d_asn,
-                        "name": d_net.get("name", f"AS{d_asn}"),
-                        "info_type": d_net.get("info_type", ""),
-                        "is_direct": False,
-                        "category": "Downstream",
-                    })
-                    assigned_asns.add(d_asn)
-            children.sort(key=lambda x: x["name"])
+        # ==================================================================
+        # PHASE 2 — Build Exchange/IXP nodes first
+        #
+        # Give IXP peers first pick of downstream children so they are
+        # never swallowed by a transit provider.
+        # ==================================================================
+        level1_nodes: Dict[int, dict] = {}
+        assigned_children: set = set()
 
-            name = peer_nets[0].get("name", f"AS{hop_asn}") if peer_nets else f"AS{hop_asn}"
-            info_type = peer_nets[0].get("info_type", "") if peer_nets else "NSP"
+        for asn in sorted(identity_map.keys()):
+            if identity_map[asn] != "Exchange/IXP":
+                continue
 
-            direct_peer_nodes[hop_asn] = {
-                "asn": hop_asn,
-                "name": name,
-                "info_type": info_type,
-                "is_direct": True,
-                "verified": verified,
-                "verification": verification,
-                "shared_ix": shared_ix,
-                "category": "Exchange/IXP" if verified else "Upstream Transit",
-                "children": children,
-            }
-            assigned_asns.add(hop_asn)
-
-        # ------------------------------------------------------------------
-        # Exchange/IXP: Facility networks on shared IXes that are NOT
-        # direct BGP peers.  These can be reached via the local IX fabric
-        # and should appear as Exchange/IXP peer nodes in the visualization.
-        # ------------------------------------------------------------------
-        ix_facility_asns = (
-            (ix_member_asns & facility_asn_set)
-            - set(direct_peer_nodes.keys())
-            - assigned_asns
-        )
-        for ix_asn in sorted(ix_facility_asns):
-            net = facility_nets.get(ix_asn)
+            net = facility_nets.get(asn)
+            if not net:
+                peer_data = fetch_peeringdb(f"net?asn={asn}")
+                net = peer_data[0] if peer_data else None
             if not net:
                 continue
-            shared_ix_names = [
+
+            downstream_at_fac = peer_downstreams.get(asn, set()) & facility_asn_set
+            children = []
+            for d_asn in sorted(downstream_at_fac):
+                if d_asn in reserved_level_1 or d_asn in assigned_children or d_asn in local_set:
+                    continue
+                d_net = facility_nets.get(d_asn)
+                if d_net:
+                    children.append({
+                        "asn": d_asn,
+                        "name": d_net.get("name", f"AS{d_asn}"),
+                        "info_type": d_net.get("info_type", ""),
+                        "is_direct": False,
+                        "category": "Downstream",
+                    })
+                    assigned_children.add(d_asn)
+
+            shared_ix_list = [
                 ix_names.get(ix, f"IX-{ix}")
-                for ix in asn_to_shared_ixes.get(ix_asn, [])
+                for ix in asn_to_shared_ixes.get(asn, [])
             ]
-            direct_peer_nodes[ix_asn] = {
-                "asn": ix_asn,
-                "name": net.get("name", f"AS{ix_asn}"),
+            is_at_fac = asn in facility_asn_set
+
+            level1_nodes[asn] = {
+                "asn": asn,
+                "name": net.get("name", f"AS{asn}"),
                 "info_type": net.get("info_type", ""),
-                "is_direct": False,
+                "is_direct": asn in direct_peer_asns,
                 "verified": True,
-                "verification": "Shared IX (Facility)",
-                "shared_ix": shared_ix_names,
+                "verification": "Shared IX (Facility)" if is_at_fac else "Shared IX",
+                "shared_ix": shared_ix_list,
                 "category": "Exchange/IXP",
-                "children": [],
+                "children": children,
             }
-            assigned_asns.add(ix_asn)
 
-        # ------------------------------------------------------------------
-        # Nest ALL unassigned facility networks under their nearest direct
-        # peer using the global peer_downstreams map.  Both "transit
-        # reachable" and truly "unresolved" networks end up inside a peer's
-        # children array — no separate top-level arrays.
-        # ------------------------------------------------------------------
-        remaining_asns = set()
-        for asn in facility_nets:
-            if asn not in assigned_asns:
-                remaining_asns.add(asn)
+        # ==================================================================
+        # PHASE 3 — Build Direct On-Net and Upstream Transit nodes
+        #
+        # Strict guard: skip any child_asn in reserved_level_1.
+        # ==================================================================
+        for asn in sorted(identity_map.keys()):
+            cat = identity_map[asn]
+            if cat == "Exchange/IXP":
+                continue  # already built
 
+            net = facility_nets.get(asn)
+            if not net:
+                peer_data = fetch_peeringdb(f"net?asn={asn}")
+                net = peer_data[0] if peer_data else None
+            if not net:
+                continue
+
+            downstream_at_fac = peer_downstreams.get(asn, set()) & facility_asn_set
+            children = []
+            for d_asn in sorted(downstream_at_fac):
+                if d_asn in reserved_level_1 or d_asn in assigned_children or d_asn in local_set:
+                    continue
+                d_net = facility_nets.get(d_asn)
+                if d_net:
+                    children.append({
+                        "asn": d_asn,
+                        "name": d_net.get("name", f"AS{d_asn}"),
+                        "info_type": d_net.get("info_type", ""),
+                        "is_direct": False,
+                        "category": "Downstream",
+                    })
+                    assigned_children.add(d_asn)
+
+            is_at_fac = asn in facility_asn_set
+            if cat == "Direct Peer":
+                verification = "PeeringDB Facility"
+            else:
+                verification = "External 1-Hop"
+
+            level1_nodes[asn] = {
+                "asn": asn,
+                "name": net.get("name", f"AS{asn}"),
+                "info_type": net.get("info_type", ""),
+                "is_direct": asn in direct_peer_asns,
+                "verified": is_at_fac,
+                "verification": verification,
+                "shared_ix": [ix_names.get(ix, f"IX-{ix}") for ix in asn_to_shared_ixes.get(asn, [])],
+                "category": cat,
+                "children": children,
+            }
+
+        # ==================================================================
+        # PHASE 4 — Remainder assignment & tree assembly
+        # ==================================================================
+        remaining_asns = facility_asn_set - reserved_level_1 - assigned_children - local_set
+
+        # Nest via peer_downstreams into non-IXP peers
         transit_nested = 0
         for t_asn in list(remaining_asns):
             for peer_asn, ds_set in peer_downstreams.items():
-                if t_asn in ds_set and peer_asn in direct_peer_nodes:
+                if t_asn in ds_set and peer_asn in level1_nodes and level1_nodes[peer_asn]["category"] != "Exchange/IXP":
                     t_net = facility_nets[t_asn]
-                    direct_peer_nodes[peer_asn]["children"].append({
+                    level1_nodes[peer_asn]["children"].append({
                         "asn": t_asn,
                         "name": t_net.get("name", f"AS{t_asn}"),
                         "info_type": t_net.get("info_type", ""),
                         "is_direct": False,
                         "category": "Reachable Transit",
                     })
-                    assigned_asns.add(t_asn)
+                    assigned_children.add(t_asn)
                     remaining_asns.discard(t_asn)
                     transit_nested += 1
                     break
 
-        # Truly unresolved: assign round-robin to the peer with the fewest
-        # existing children so they don't sit as orphan top-level nodes.
-        # Skip Exchange/IXP-only nodes (they have no routing relationship).
+        # Round-robin truly unresolved into routable (non-IXP) peers
         routable_peers = [
-            p for p in direct_peer_nodes.values()
+            p for p in level1_nodes.values()
             if p["category"] != "Exchange/IXP"
         ]
         if remaining_asns and routable_peers:
             for u_asn in sorted(remaining_asns):
                 u_net = facility_nets[u_asn]
-                target_peer = min(
-                    routable_peers,
-                    key=lambda p: len(p["children"]),
-                )
-                target_peer["children"].append({
+                target = min(routable_peers, key=lambda p: len(p["children"]))
+                target["children"].append({
                     "asn": u_asn,
                     "name": u_net.get("name", f"AS{u_asn}"),
                     "info_type": u_net.get("info_type", ""),
@@ -839,13 +868,11 @@ async def get_routing_flow(
                 transit_nested += 1
 
         # Re-sort children within each peer
-        for node in direct_peer_nodes.values():
+        for node in level1_nodes.values():
             node["children"].sort(key=lambda x: x["name"])
 
-        # ------------------------------------------------------------------
         # Assemble tree
-        # ------------------------------------------------------------------
-        direct_list = sorted(direct_peer_nodes.values(), key=lambda x: x["name"])
+        direct_list = sorted(level1_nodes.values(), key=lambda x: x["name"])
         downstream_total = sum(
             1 for p in direct_list for c in p["children"]
             if c.get("category") == "Downstream"
