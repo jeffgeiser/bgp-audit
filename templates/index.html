@@ -16,9 +16,10 @@
         .btn-toggle { transition: all 0.2s cubic-bezier(0.4, 0, 0.2, 1); }
         .sidebar-btn { transition: all 0.1s ease-out; }
         .donut-logo {
-            background:
-                linear-gradient(transparent, transparent) padding-box,
-                conic-gradient(from 200deg, #93c5fd, #00a9e0, #38bdf8, #93c5fd) border-box;
+            background: linear-gradient(to right, #33d4ff, #0076ff) border-box;
+            -webkit-mask: linear-gradient(#fff 0 0) padding-box, linear-gradient(#fff 0 0);
+            -webkit-mask-composite: destination-out;
+            mask-composite: exclude;
         }
     </style>
 </head>
