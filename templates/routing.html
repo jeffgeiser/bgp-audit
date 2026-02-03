@@ -281,10 +281,12 @@
                     const resp = await fetch(url);
                     if (!resp.ok) throw new Error('Failed to load');
                     this.treeData = await resp.json();
-                    this.directOnNetCount = this.treeData.direct_on_net_count || 0;
-                    this.exchangeIxpCount = this.treeData.exchange_ixp_count || 0;
-                    this.upstreamTransitCount = this.treeData.upstream_transit_count || 0;
-                    this.downstreamCount = this.treeData.downstream_count || 0;
+                    // Compute counts from actual children for accuracy
+                    const allPeers = this.treeData.children || [];
+                    this.directOnNetCount = allPeers.filter(p => p.category === 'Direct Peer').length;
+                    this.exchangeIxpCount = allPeers.filter(p => p.category === 'Exchange/IXP').length;
+                    this.upstreamTransitCount = allPeers.filter(p => p.category === 'Upstream Transit').length;
+                    this.downstreamCount = allPeers.reduce((sum, p) => sum + (p.children || []).filter(c => c.category === 'Downstream').length, 0);
                     this.peerFilter = 'direct';
                     // All peers collapsed by default; user clicks to expand
                     (this.treeData.children || []).forEach(p => { this.expandedPeers[p.asn] = false; });
