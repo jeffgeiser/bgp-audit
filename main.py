@@ -611,12 +611,23 @@ async def get_routing_flow(
 
         # Build a lookup: {ix_id: ix_name}
         ix_names: Dict[int, str] = {}
+        # Comprehensive IX member set & per-ASN mapping (no extra API calls
+        # later when adding facility IX members as Exchange/IXP nodes).
+        ix_member_asns: set = set()
+        asn_to_shared_ixes: Dict[int, List[int]] = {}
         if zenlayer_local_ixes:
             ix_data = fetch_peeringdb(
                 f"ix?id__in={','.join(map(str, zenlayer_local_ixes))}"
             )
             for ix in ix_data:
                 ix_names[ix["id"]] = ix.get("name", f"IX-{ix['id']}")
+
+            for ix_id in zenlayer_local_ixes:
+                for rec in fetch_peeringdb(f"netixlan?ix_id={ix_id}"):
+                    asn = rec.get("asn")
+                    if asn and asn not in local_set:
+                        ix_member_asns.add(asn)
+                        asn_to_shared_ixes.setdefault(asn, []).append(ix_id)
 
         # ------------------------------------------------------------------
         # AS-Path Frequency Analysis  (2 API calls per local ASN, cached)
@@ -736,6 +747,37 @@ async def get_routing_flow(
                 "children": children,
             }
             assigned_asns.add(hop_asn)
+
+        # ------------------------------------------------------------------
+        # Exchange/IXP: Facility networks on shared IXes that are NOT
+        # direct BGP peers.  These can be reached via the local IX fabric
+        # and should appear as Exchange/IXP peer nodes in the visualization.
+        # ------------------------------------------------------------------
+        ix_facility_asns = (
+            (ix_member_asns & facility_asn_set)
+            - set(direct_peer_nodes.keys())
+            - assigned_asns
+        )
+        for ix_asn in sorted(ix_facility_asns):
+            net = facility_nets.get(ix_asn)
+            if not net:
+                continue
+            shared_ix_names = [
+                ix_names.get(ix, f"IX-{ix}")
+                for ix in asn_to_shared_ixes.get(ix_asn, [])
+            ]
+            direct_peer_nodes[ix_asn] = {
+                "asn": ix_asn,
+                "name": net.get("name", f"AS{ix_asn}"),
+                "info_type": net.get("info_type", ""),
+                "is_direct": False,
+                "verified": True,
+                "verification": "Shared IX (Facility)",
+                "shared_ix": shared_ix_names,
+                "category": "Exchange/IXP",
+                "children": [],
+            }
+            assigned_asns.add(ix_asn)
 
         # ------------------------------------------------------------------
         # Nest ALL unassigned facility networks under their nearest direct

@@ -162,7 +162,7 @@
                     </div>
                     <div class="text-left">
                         <p class="text-[10px] font-black text-slate-400 uppercase tracking-wider">Total Networks</p>
-                        <p class="text-lg font-black text-[#00205B] leading-tight" x-text="summary?.total || 0"></p>
+                        <p class="text-lg font-black text-[#00205B] leading-tight" :class="isFiltered && 'italic'" x-text="dynamicTotal"></p>
                     </div>
                 </button>
 
@@ -176,7 +176,7 @@
                     </div>
                     <div class="text-left">
                         <p class="text-[10px] font-black text-slate-400 uppercase tracking-wider">Direct On-Net</p>
-                        <p class="text-lg font-black text-emerald-700 leading-tight" x-text="summary?.direct_on_net_count || 0"></p>
+                        <p class="text-lg font-black text-emerald-700 leading-tight" :class="isFiltered && 'italic'" x-text="dynamicDirectCount"></p>
                     </div>
                 </button>
 
@@ -190,7 +190,7 @@
                     </div>
                     <div class="text-left">
                         <p class="text-[10px] font-black text-slate-400 uppercase tracking-wider">Exchange / IXP</p>
-                        <p class="text-lg font-black text-amber-700 leading-tight" x-text="summary?.exchange_ixp_count || 0"></p>
+                        <p class="text-lg font-black text-amber-700 leading-tight" :class="isFiltered && 'italic'" x-text="dynamicIxpCount"></p>
                     </div>
                 </button>
 
@@ -204,9 +204,14 @@
                     </div>
                     <div class="text-left">
                         <p class="text-[10px] font-black text-slate-400 uppercase tracking-wider">Upstream Transit</p>
-                        <p class="text-lg font-black text-red-600 leading-tight" x-text="summary?.transit_count || 0"></p>
+                        <p class="text-lg font-black text-red-600 leading-tight" :class="isFiltered && 'italic'" x-text="dynamicTransitCount"></p>
                     </div>
                 </button>
+            </div>
+
+            <!-- Filter indicator -->
+            <div x-show="isFiltered && networks.length" class="px-6 pb-1 -mt-1 border-t border-slate-100 pt-2">
+                <span class="text-[10px] italic text-slate-400">Showing filtered results for <span x-text="viewModeLabel" class="font-semibold not-italic"></span></span>
             </div>
 
             <!-- Filtered network badge grid -->
@@ -327,6 +332,12 @@
                     return 'bg-red-400';
                 },
 
+                get dynamicTotal() { return this.networks.length; },
+                get dynamicDirectCount() { return this.networks.filter(n => this.getHealth(n) === 'green').length; },
+                get dynamicIxpCount() { return this.networks.filter(n => this.getHealth(n) === 'yellow').length; },
+                get dynamicTransitCount() { return this.networks.filter(n => this.getHealth(n) === 'red').length; },
+                get isFiltered() { return this.viewMode !== 'all'; },
+
                 get viewModeLabel() {
                     const labels = { 'upstream': 'Upstream Providers', 'peers': 'Content & Peers', 'all': 'Global Networks' };
                     return labels[this.viewMode];
@@ -399,8 +410,8 @@
                         if (summaryResponse.ok) {
                             this.summary = await summaryResponse.json();
                         }
-                        // Auto-show all networks after load
-                        this.tileFilter = 'all';
+                        // Auto-show Direct On-Net networks after load
+                        this.tileFilter = 'green';
                     } catch (err) {
                         console.error('Audit Engine Failure:', err);
                     } finally {
