@@ -478,6 +478,9 @@ async def discover_summary(
                 if rec.get("ix_id"):
                     zl_ix_ids.add(rec["ix_id"])
 
+        print(f"[Summary] Zenlayer net_ids: {zenlayer_net_ids}")
+        print(f"[Summary] Zenlayer IX IDs: {sorted(list(zl_ix_ids))[:10] if zl_ix_ids else 'NONE'}")
+
         if zl_ix_ids:
             ix_query = ",".join(map(str, zl_ix_ids))
             for rec in fetch_peeringdb(f"netixlan?ix_id__in={ix_query}"):
@@ -492,6 +495,9 @@ async def discover_summary(
             f"{len(ix_member_asns)} IX member ASNs, "
             f"{len(ix_member_asns & facility_asns)} IX members at facility"
         )
+        print(f"[Summary] Direct at facility: {sorted(list(direct_at_facility))}")
+        print(f"[Summary] IX member ASNs (sample): {sorted(list(ix_member_asns))[:20]}")
+        print(f"[Summary] Intersection (IX peers): {sorted(list(direct_at_facility & ix_member_asns))}")
 
         # New classification logic:
         # Exchange/IXP: 1-hop neighbors that share an IX with Zenlayer (public peering)
