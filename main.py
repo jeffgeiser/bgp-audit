@@ -479,13 +479,19 @@ async def discover_summary(
                     zl_ix_ids.add(rec["ix_id"])
 
         print(f"[Summary] Zenlayer net_ids: {zenlayer_net_ids}")
-        print(f"[Summary] Zenlayer IX IDs: {sorted(list(zl_ix_ids))[:10] if zl_ix_ids else 'NONE'}")
+        print(f"[Summary] Zenlayer IX IDs: {sorted(list(zl_ix_ids))[:10] if zl_ix_ids else 'NONE'} (total: {len(zl_ix_ids)})")
 
+        # Batch IX member queries to prevent timeout with large IX counts
         if zl_ix_ids:
-            ix_query = ",".join(map(str, zl_ix_ids))
-            for rec in fetch_peeringdb(f"netixlan?ix_id__in={ix_query}"):
-                if rec.get("asn"):
-                    ix_member_asns.add(rec["asn"])
+            ix_list = list(zl_ix_ids)
+            batch_size = 15  # Query 15 IXes at a time to stay under 10s timeout
+            for i in range(0, len(ix_list), batch_size):
+                batch = ix_list[i:i + batch_size]
+                ix_query = ",".join(map(str, batch))
+                print(f"[Summary] Fetching IX members for batch {i//batch_size + 1}/{(len(ix_list) + batch_size - 1)//batch_size}: IXes {batch[:3]}...")
+                for rec in fetch_peeringdb(f"netixlan?ix_id__in={ix_query}"):
+                    if rec.get("asn"):
+                        ix_member_asns.add(rec["asn"])
 
         ix_member_asns -= local_set
 
