@@ -257,7 +257,7 @@ def save_config(data: Dict[str, Any]):
     with open(CONFIG_FILE, 'w') as f:
         json.dump(data, f, indent=4)
 
-def fetch_peeringdb(endpoint: str) -> List[Dict[str, Any]]:
+def fetch_peeringdb(endpoint: str, timeout: int = 10) -> List[Dict[str, Any]]:
     """Fetches data from PeeringDB with 24-hour file cache."""
     clean_endpoint = endpoint.strip("/")
     cache_key = _cache_key("pdb", clean_endpoint)
@@ -268,7 +268,7 @@ def fetch_peeringdb(endpoint: str) -> List[Dict[str, Any]]:
 
     url = f"{PEERINGDB_BASE}/{clean_endpoint}"
     try:
-        response = requests.get(url, timeout=10)
+        response = requests.get(url, timeout=timeout)
         response.raise_for_status()
         data = response.json().get("data", [])
         _write_cache(cache_key, data)
@@ -484,12 +484,12 @@ async def discover_summary(
         # Batch IX member queries to prevent timeout with large IX counts
         if zl_ix_ids:
             ix_list = list(zl_ix_ids)
-            batch_size = 15  # Query 15 IXes at a time to stay under 10s timeout
+            batch_size = 5  # Query 5 IXes at a time with extended timeout
             for i in range(0, len(ix_list), batch_size):
                 batch = ix_list[i:i + batch_size]
                 ix_query = ",".join(map(str, batch))
                 print(f"[Summary] Fetching IX members for batch {i//batch_size + 1}/{(len(ix_list) + batch_size - 1)//batch_size}: IXes {batch[:3]}...")
-                for rec in fetch_peeringdb(f"netixlan?ix_id__in={ix_query}"):
+                for rec in fetch_peeringdb(f"netixlan?ix_id__in={ix_query}", timeout=30):
                     if rec.get("asn"):
                         ix_member_asns.add(rec["asn"])
 
@@ -624,14 +624,20 @@ async def get_routing_flow(
             for ix in ix_data:
                 ix_names[ix["id"]] = ix.get("name", f"IX-{ix['id']}")
 
-            # Single batched query for all IX members
-            for rec in fetch_peeringdb(f"netixlan?ix_id__in={ix_query}"):
-                asn = rec.get("asn")
-                ix_id = rec.get("ix_id")
-                if asn and asn not in local_set:
-                    ix_member_asns.add(asn)
-                    if ix_id:
-                        asn_to_shared_ixes.setdefault(asn, []).append(ix_id)
+            # Batch IX member queries to prevent timeout with large IX counts
+            ix_list = list(zl_ix_ids)
+            batch_size = 5  # Query 5 IXes at a time with extended timeout
+            for i in range(0, len(ix_list), batch_size):
+                batch = ix_list[i:i + batch_size]
+                batch_query = ",".join(map(str, batch))
+                print(f"[RoutingFlow] Fetching IX members for batch {i//batch_size + 1}/{(len(ix_list) + batch_size - 1)//batch_size}")
+                for rec in fetch_peeringdb(f"netixlan?ix_id__in={batch_query}", timeout=30):
+                    asn = rec.get("asn")
+                    ix_id = rec.get("ix_id")
+                    if asn and asn not in local_set:
+                        ix_member_asns.add(asn)
+                        if ix_id:
+                            asn_to_shared_ixes.setdefault(asn, []).append(ix_id)
 
         # ==================================================================
         # AS-Path Frequency Analysis  (2 API calls per local ASN, cached)
