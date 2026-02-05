@@ -36,7 +36,7 @@ DEFAULT_CONFIG = {
 # File-based JSON cache with 24-hour TTL
 # ---------------------------------------------------------------------------
 CACHE_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), ".api_cache")
-CACHE_TTL = 86400  # 24 hours in seconds
+CACHE_TTL = 604800  # 7 days in seconds (PeeringDB data is relatively static)
 
 def _cache_key(prefix: str, value: str) -> str:
     """Generate a filesystem-safe cache key."""
@@ -257,8 +257,8 @@ def save_config(data: Dict[str, Any]):
     with open(CONFIG_FILE, 'w') as f:
         json.dump(data, f, indent=4)
 
-def fetch_peeringdb(endpoint: str) -> List[Dict[str, Any]]:
-    """Fetches data from PeeringDB with 24-hour file cache."""
+def fetch_peeringdb(endpoint: str, timeout: int = 10) -> List[Dict[str, Any]]:
+    """Fetches data from PeeringDB with 7-day file cache."""
     clean_endpoint = endpoint.strip("/")
     cache_key = _cache_key("pdb", clean_endpoint)
 
@@ -268,7 +268,7 @@ def fetch_peeringdb(endpoint: str) -> List[Dict[str, Any]]:
 
     url = f"{PEERINGDB_BASE}/{clean_endpoint}"
     try:
-        response = requests.get(url, timeout=10)
+        response = requests.get(url, timeout=timeout)
         response.raise_for_status()
         data = response.json().get("data", [])
         _write_cache(cache_key, data)
@@ -481,15 +481,12 @@ async def discover_summary(
         print(f"[Summary] Zenlayer net_ids: {zenlayer_net_ids}")
         print(f"[Summary] Zenlayer IX IDs: {sorted(list(zl_ix_ids))[:10] if zl_ix_ids else 'NONE'} (total: {len(zl_ix_ids)})")
 
-        # Batch IX member queries to prevent timeout with large IX counts
+        # Fetch IX members per-IX for better cache reuse across locations
+        # Each IX is cached individually for 7 days, so subsequent requests are instant
         if zl_ix_ids:
-            ix_list = list(zl_ix_ids)
-            batch_size = 15  # Query 15 IXes at a time to stay under 10s timeout
-            for i in range(0, len(ix_list), batch_size):
-                batch = ix_list[i:i + batch_size]
-                ix_query = ",".join(map(str, batch))
-                print(f"[Summary] Fetching IX members for batch {i//batch_size + 1}/{(len(ix_list) + batch_size - 1)//batch_size}: IXes {batch[:3]}...")
-                for rec in fetch_peeringdb(f"netixlan?ix_id__in={ix_query}"):
+            print(f"[Summary] Fetching IX members for {len(zl_ix_ids)} IXes (cached individually)...")
+            for ix_id in zl_ix_ids:
+                for rec in fetch_peeringdb(f"netixlan?ix_id={ix_id}", timeout=30):
                     if rec.get("asn"):
                         ix_member_asns.add(rec["asn"])
 
@@ -624,14 +621,16 @@ async def get_routing_flow(
             for ix in ix_data:
                 ix_names[ix["id"]] = ix.get("name", f"IX-{ix['id']}")
 
-            # Single batched query for all IX members
-            for rec in fetch_peeringdb(f"netixlan?ix_id__in={ix_query}"):
-                asn = rec.get("asn")
-                ix_id = rec.get("ix_id")
-                if asn and asn not in local_set:
-                    ix_member_asns.add(asn)
-                    if ix_id:
-                        asn_to_shared_ixes.setdefault(asn, []).append(ix_id)
+            # Fetch IX members per-IX for better cache reuse across locations
+            # Each IX is cached individually for 7 days, so subsequent requests are instant
+            print(f"[RoutingFlow] Fetching IX members for {len(zl_ix_ids)} IXes (cached individually)...")
+            for ix_id in zl_ix_ids:
+                for rec in fetch_peeringdb(f"netixlan?ix_id={ix_id}", timeout=30):
+                    asn = rec.get("asn")
+                    if asn and asn not in local_set:
+                        ix_member_asns.add(asn)
+                        if ix_id:
+                            asn_to_shared_ixes.setdefault(asn, []).append(ix_id)
 
         # ==================================================================
         # AS-Path Frequency Analysis  (2 API calls per local ASN, cached)
