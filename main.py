@@ -459,74 +459,71 @@ async def discover_summary(
         facility_asns = {n["asn"] for n in all_nets if n.get("asn")}
         direct_at_facility = direct_peer_asns & facility_asns
 
+        # ----- LOCAL IX detection: Only check IXes at this facility -----
+        # Step 1: Get all IXes at the target facilities
+        if fac_id:
+            target_fac_ids = [fac_id]
+        elif location_name:
+            if location_type == "metro":
+                config = load_config()
+                mapping = config.get("METRO_MAP", {})
+                cities_in_metro = [city for city, m in mapping.items() if m == location_name]
+                target_fac_ids = [f["id"] for f in zenlayer_state["facilities"] if f.get("city") in cities_in_metro]
+            else:
+                target_fac_ids = [f["id"] for f in zenlayer_state["facilities"] if f.get("city") == location_name]
+        else:
+            target_fac_ids = []
+
+        local_ixes = []
+        zenlayer_local_ix_ids = set()
+        if target_fac_ids:
+            # Get IXes at these facilities
+            fac_query = ",".join(map(str, target_fac_ids))
+            ixfacs = fetch_peeringdb(f"ixfac?fac_id__in={fac_query}")
+            local_ix_ids = list(set([ixf["ix_id"] for ixf in ixfacs if ixf.get("ix_id")]))
+
+            if local_ix_ids:
+                # Get IX details
+                ix_query = ",".join(map(str, local_ix_ids))
+                local_ixes_data = fetch_peeringdb(f"ix?id__in={ix_query}")
+
+                # Check which local IXes Zenlayer is connected to
+                zenlayer_net_ids = [n["id"] for n in zenlayer_state.get("networks", [])]
+                if zenlayer_net_ids:
+                    net_id_query = ",".join(map(str, zenlayer_net_ids))
+                    zl_ixlan = fetch_peeringdb(f"netixlan?net_id__in={net_id_query}")
+                    zenlayer_all_ix_ids = set([rec["ix_id"] for rec in zl_ixlan if rec.get("ix_id")])
+                    zenlayer_local_ix_ids = set(local_ix_ids) & zenlayer_all_ix_ids
+
+                    # Build list of IXes at this facility that Zenlayer uses
+                    for ix in local_ixes_data:
+                        if ix["id"] in zenlayer_local_ix_ids:
+                            local_ixes.append({
+                                "id": ix["id"],
+                                "name": ix.get("name", f"IX-{ix['id']}"),
+                                "name_long": ix.get("name_long", ""),
+                            })
+
+        print(f"[Summary] {location_name}: {len(local_ixes)} local IXes where Zenlayer is present")
+
+        # Simplified classification without global IX checking
+        # Direct On-Net: BGP peers at the facility
         direct_neighbors = [
             {"asn": n["asn"], "name": n["name"]}
             for n in all_nets if n["asn"] in direct_at_facility
         ]
 
-        # ----- IX detection: use ALL Zenlayer IXes -----
-        # Locality is enforced by intersecting with facility_asns below
-        zenlayer_net_ids = [
-            n["id"] for n in zenlayer_state.get("networks", [])
-        ]
-
-        ix_member_asns: set = set()
-        zl_ix_ids: set = set()
-        if zenlayer_net_ids:
-            net_id_query = ",".join(map(str, zenlayer_net_ids))
-            for rec in fetch_peeringdb(f"netixlan?net_id__in={net_id_query}"):
-                if rec.get("ix_id"):
-                    zl_ix_ids.add(rec["ix_id"])
-
-        print(f"[Summary] Zenlayer net_ids: {zenlayer_net_ids}")
-        print(f"[Summary] Zenlayer IX IDs: {sorted(list(zl_ix_ids))[:10] if zl_ix_ids else 'NONE'} (total: {len(zl_ix_ids)})")
-
-        # Fetch IX members per-IX for better cache reuse across locations
-        # Each IX is cached individually for 7 days, so subsequent requests are instant
-        if zl_ix_ids:
-            print(f"[Summary] Fetching IX members for {len(zl_ix_ids)} IXes (cached individually)...")
-            for ix_id in zl_ix_ids:
-                for rec in fetch_peeringdb(f"netixlan?ix_id={ix_id}", timeout=30):
-                    if rec.get("asn"):
-                        ix_member_asns.add(rec["asn"])
-
-        ix_member_asns -= local_set
-
-        print(
-            f"[Summary] {location}: "
-            f"{len(zl_ix_ids)} Zenlayer IXes, "
-            f"{len(ix_member_asns)} IX member ASNs, "
-            f"{len(ix_member_asns & facility_asns)} IX members at facility"
-        )
-        print(f"[Summary] Direct at facility: {sorted(list(direct_at_facility))}")
-        print(f"[Summary] IX member ASNs (sample): {sorted(list(ix_member_asns))[:20]}")
-        print(f"[Summary] Intersection (IX peers): {sorted(list(direct_at_facility & ix_member_asns))}")
-
-        # New classification logic:
-        # Exchange/IXP: 1-hop neighbors that share an IX with Zenlayer (public peering)
-        exchange_ixp_at_facility = direct_at_facility & ix_member_asns
-
-        # Direct On-Net: 1-hop neighbors at facility that DON'T share an IX (private peering)
-        direct_on_net_at_facility = direct_at_facility - ix_member_asns
-
-        # Transit: Everything else at the facility (not 1-hop neighbors)
-        transit_at_facility = (
-            facility_asns - direct_at_facility - local_set
-        )
-
-        direct_neighbors = [
-            {"asn": n["asn"], "name": n["name"]}
-            for n in all_nets if n["asn"] in direct_on_net_at_facility
-        ]
+        # Transit: Everything else at the facility
+        transit_at_facility = facility_asns - direct_at_facility - local_set
 
         return {
             "total": len(all_nets),
             "direct_on_net_count": len(direct_neighbors),
-            "exchange_ixp_count": len(exchange_ixp_at_facility),
+            "exchange_ixp_count": len(local_ixes),  # Number of IXes, not networks
             "transit_count": len(transit_at_facility),
             "direct_peers": sorted(direct_neighbors, key=lambda x: x["name"]),
-            "direct_peer_asns": sorted(list(direct_on_net_at_facility)),
-            "exchange_ixp_asns": sorted(list(exchange_ixp_at_facility)),
+            "direct_peer_asns": sorted(list(direct_at_facility)),
+            "local_ixes": sorted(local_ixes, key=lambda x: x["name"]),
         }
     except Exception as e:
         print(f"[API] Summary error: {e}")
@@ -621,16 +618,24 @@ async def get_routing_flow(
             for ix in ix_data:
                 ix_names[ix["id"]] = ix.get("name", f"IX-{ix['id']}")
 
-            # Fetch IX members per-IX for better cache reuse across locations
-            # Each IX is cached individually for 7 days, so subsequent requests are instant
-            print(f"[RoutingFlow] Fetching IX members for {len(zl_ix_ids)} IXes (cached individually)...")
+            # Fetch IX members with aggressive timeout to prevent hanging
+            # Failed IXes are skipped - better to have partial data than wait forever
+            print(f"[RoutingFlow] Fetching IX members for {len(zl_ix_ids)} IXes...")
+            successful = 0
+            failed = 0
             for ix_id in zl_ix_ids:
-                for rec in fetch_peeringdb(f"netixlan?ix_id={ix_id}", timeout=30):
-                    asn = rec.get("asn")
-                    if asn and asn not in local_set:
-                        ix_member_asns.add(asn)
-                        if ix_id:
-                            asn_to_shared_ixes.setdefault(asn, []).append(ix_id)
+                members = fetch_peeringdb(f"netixlan?ix_id={ix_id}", timeout=8)
+                if members:
+                    successful += 1
+                    for rec in members:
+                        asn = rec.get("asn")
+                        if asn and asn not in local_set:
+                            ix_member_asns.add(asn)
+                            if ix_id:
+                                asn_to_shared_ixes.setdefault(asn, []).append(ix_id)
+                else:
+                    failed += 1
+            print(f"[RoutingFlow] IX fetch complete: {successful} successful, {failed} failed/empty")
 
         # ==================================================================
         # AS-Path Frequency Analysis  (2 API calls per local ASN, cached)

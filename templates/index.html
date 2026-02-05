@@ -216,7 +216,7 @@
             </div>
 
             <!-- Filtered network badge grid -->
-            <div x-show="tileFilter" x-transition class="border-t border-slate-100 px-6 py-4">
+            <div x-show="tileFilter && tileFilter !== 'yellow'" x-transition class="border-t border-slate-100 px-6 py-4">
                 <div class="flex items-center justify-between mb-3">
                     <div class="flex items-center gap-3">
                         <p class="text-[10px] font-black text-slate-400 uppercase tracking-wider" x-text="tileFilterLabel"></p>
@@ -240,6 +240,31 @@
                     </template>
                 </div>
                 <div x-show="filteredBadgeNetworks.length === 0" class="text-center py-6 text-slate-400 text-xs italic">No networks match your search.</div>
+            </div>
+
+            <!-- IXP list (shown when yellow tile is clicked) -->
+            <div x-show="tileFilter === 'yellow'" x-transition class="border-t border-slate-100 px-6 py-4">
+                <div class="flex items-center justify-between mb-3">
+                    <div class="flex items-center gap-3">
+                        <p class="text-[10px] font-black text-slate-400 uppercase tracking-wider">Internet Exchanges at this Location</p>
+                        <span class="text-[10px] font-bold text-slate-300" x-text="localIxes.length + ' exchanges'"></span>
+                    </div>
+                </div>
+                <div class="grid grid-cols-2 gap-3">
+                    <template x-for="ix in localIxes" :key="ix.id">
+                        <a :href="'https://www.peeringdb.com/ix/' + ix.id" target="_blank"
+                            class="flex items-center gap-3 px-4 py-3 rounded-xl border border-amber-200 bg-amber-50 text-sm hover:shadow-sm hover:border-amber-300 transition-all">
+                            <div class="w-8 h-8 rounded-lg bg-amber-100 flex items-center justify-center flex-shrink-0">
+                                <svg class="w-4 h-4 text-amber-700" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M8 7h12m0 0l-4-4m4 4l-4 4m0 6H4m0 0l4 4m-4-4l4-4" /></svg>
+                            </div>
+                            <div class="flex-1 min-w-0">
+                                <p class="font-bold text-amber-900 truncate" x-text="ix.name"></p>
+                                <p class="text-[10px] text-amber-600 truncate" x-text="ix.name_long"></p>
+                            </div>
+                        </a>
+                    </template>
+                </div>
+                <div x-show="localIxes.length === 0" class="text-center py-6 text-slate-400 text-xs italic">No internet exchanges found at this location.</div>
             </div>
         </div>
 
@@ -275,6 +300,7 @@
                 searchQuery: '',
                 loading: false,
                 summary: null,
+                localIxes: [],
                 tileFilter: '',
 
                 get filteredFacilities() {
@@ -294,8 +320,6 @@
                 getHealth(net) {
                     const directAsns = this.summary?.direct_peer_asns || [];
                     if (directAsns.includes(net.asn)) return 'green';
-                    const ixpAsns = this.summary?.exchange_ixp_asns || [];
-                    if (ixpAsns.includes(net.asn)) return 'yellow';
                     return 'red';
                 },
 
@@ -335,7 +359,7 @@
 
                 get dynamicTotal() { return this.networks.length; },
                 get dynamicDirectCount() { return this.networks.filter(n => this.getHealth(n) === 'green').length; },
-                get dynamicIxpCount() { return this.networks.filter(n => this.getHealth(n) === 'yellow').length; },
+                get dynamicIxpCount() { return this.summary?.exchange_ixp_count || 0; },
                 get dynamicTransitCount() { return this.networks.filter(n => this.getHealth(n) === 'red').length; },
                 get isFiltered() { return this.viewMode !== 'all'; },
 
@@ -410,6 +434,7 @@
 
                         if (summaryResponse.ok) {
                             this.summary = await summaryResponse.json();
+                            this.localIxes = this.summary.local_ixes || [];
                         }
                         // Auto-show Direct On-Net networks after load
                         this.tileFilter = 'green';
