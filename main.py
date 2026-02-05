@@ -299,9 +299,10 @@ def initialize_footprint():
 
     netfacs = fetch_peeringdb(f"netfac?net_id__in={','.join(map(str, net_ids))}")
     fac_ids = list(set([nf["fac_id"] for nf in netfacs]))
-    
+
     if fac_ids:
         facilities = fetch_peeringdb(f"fac?id__in={','.join(map(str, fac_ids))}")
+        print(f"[Footprint] Loaded {len(facilities)} total facilities")
         mapping = config.get("METRO_MAP", {})
         
         cities = set()
@@ -319,7 +320,12 @@ def initialize_footprint():
         zenlayer_state["facilities"] = sorted(facilities, key=lambda x: x["name"])
         zenlayer_state["unique_cities"] = sorted(list(cities))
         zenlayer_state["unique_metros"] = sorted(list(metros))
-    
+
+        # Debug: Show facility distribution per city
+        from collections import Counter
+        city_counts = Counter([f.get("city") for f in facilities if f.get("city")])
+        print(f"[Footprint] Facilities per city: {dict(city_counts)}")
+
     print(f"Zenlayer BGP Audit: Footprint loaded. ASNs: {asns}, Metros: {len(zenlayer_state['unique_metros'])}, Cities: {len(zenlayer_state['unique_cities'])}")
 @app.get("/", response_class=HTMLResponse)
 @app.get("", response_class=HTMLResponse)
@@ -381,8 +387,11 @@ def _get_discovery_data(fac_id: Optional[int], location_name: Optional[str], loc
             target_fac_ids = [f["id"] for f in zenlayer_state["facilities"] if f.get("city") in cities_in_metro]
         else:
             # location_type == "city"
-            target_fac_ids = [f["id"] for f in zenlayer_state["facilities"] if f.get("city") == location_name]
+            matching_facs = [f for f in zenlayer_state["facilities"] if f.get("city") == location_name]
+            target_fac_ids = [f["id"] for f in matching_facs]
             print(f"[Discovery] City '{location_name}': found {len(target_fac_ids)} facilities: {target_fac_ids}")
+            if matching_facs:
+                print(f"[Discovery] Facility details: {[(f['id'], f['name'], f.get('city')) for f in matching_facs]}")
 
         if target_fac_ids:
             fac_query = ",".join(map(str, target_fac_ids))
@@ -468,9 +477,17 @@ async def discover_summary(
                 config = load_config()
                 mapping = config.get("METRO_MAP", {})
                 cities_in_metro = [city for city, m in mapping.items() if m == location]
-                target_fac_ids = [f["id"] for f in zenlayer_state["facilities"] if f.get("city") in cities_in_metro]
+                matching_facs = [f for f in zenlayer_state["facilities"] if f.get("city") in cities_in_metro]
+                target_fac_ids = [f["id"] for f in matching_facs]
+                print(f"[Summary] Metro '{location}' includes cities: {cities_in_metro}")
+                print(f"[Summary] Found {len(target_fac_ids)} facilities in metro")
             else:
-                target_fac_ids = [f["id"] for f in zenlayer_state["facilities"] if f.get("city") == location]
+                matching_facs = [f for f in zenlayer_state["facilities"] if f.get("city") == location]
+                target_fac_ids = [f["id"] for f in matching_facs]
+                print(f"[Summary] City '{location}': {len(target_fac_ids)} facilities found")
+                if matching_facs:
+                    for fac in matching_facs:
+                        print(f"[Summary]   - Fac {fac['id']}: {fac['name']} ({fac.get('city')})")
         else:
             target_fac_ids = []
 
