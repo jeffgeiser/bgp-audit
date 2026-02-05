@@ -33,17 +33,18 @@ DEFAULT_CONFIG = {
 
 
 # ---------------------------------------------------------------------------
-# File-based JSON cache with 24-hour TTL
+# File-based JSON cache with configurable TTL
 # ---------------------------------------------------------------------------
 CACHE_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), ".api_cache")
 CACHE_TTL = 604800  # 7 days in seconds (PeeringDB data is relatively static)
+RIPESTAT_CACHE_TTL = 432000  # 5 days in seconds (AS-path data changes infrequently)
 
 def _cache_key(prefix: str, value: str) -> str:
     """Generate a filesystem-safe cache key."""
     h = hashlib.sha256(value.encode()).hexdigest()[:16]
     return f"{prefix}_{h}"
 
-def _read_cache(key: str):
+def _read_cache(key: str, ttl: int = CACHE_TTL):
     """Read a cached value if it exists and hasn't expired."""
     path = os.path.join(CACHE_DIR, f"{key}.json")
     if not os.path.exists(path):
@@ -51,14 +52,14 @@ def _read_cache(key: str):
     try:
         with open(path, "r") as f:
             entry = json.load(f)
-        if time.time() - entry.get("ts", 0) > CACHE_TTL:
+        if time.time() - entry.get("ts", 0) > ttl:
             os.remove(path)
             return None
         return entry["data"]
     except Exception:
         return None
 
-def _write_cache(key: str, data):
+def _write_cache(key: str, data, ttl: int = CACHE_TTL):
     """Write a value to the file cache."""
     os.makedirs(CACHE_DIR, exist_ok=True)
     path = os.path.join(CACHE_DIR, f"{key}.json")
@@ -93,11 +94,11 @@ def _fetch_as_path(asn: int) -> List[List[int]]:
     Returns a list of integer AS-path lists, e.g.
         [[3356, 1299, 21859], [174, 1299, 21859], ...]
 
-    The full path data is cached per-ASN so repeat calls never hit the
+    The full path data is cached per-ASN for 5 days so repeat calls never hit the
     network.
     """
     cache_key = _cache_key("aspath", str(asn))
-    cached = _read_cache(cache_key)
+    cached = _read_cache(cache_key, ttl=RIPESTAT_CACHE_TTL)
     if cached is not None:
         return cached
 
@@ -106,7 +107,7 @@ def _fetch_as_path(asn: int) -> List[List[int]]:
     # Step 1 – get announced prefixes for this ASN
     prefixes = _fetch_prefixes_for_asn(asn)
     if not prefixes:
-        _write_cache(cache_key, paths)
+        _write_cache(cache_key, paths, ttl=RIPESTAT_CACHE_TTL)
         return paths
 
     # Step 2 – pick a sample prefix (first one) and pull its looking-glass
@@ -137,14 +138,14 @@ def _fetch_as_path(asn: int) -> List[List[int]]:
     except Exception as e:
         print(f"[ASPath] Error fetching looking-glass for {sample_prefix}: {e}")
 
-    _write_cache(cache_key, paths)
+    _write_cache(cache_key, paths, ttl=RIPESTAT_CACHE_TTL)
     return paths
 
 
 def _fetch_prefixes_for_asn(asn: int) -> List[str]:
-    """Return a list of prefixes originated by *asn* (cached)."""
+    """Return a list of prefixes originated by *asn* (cached for 5 days)."""
     cache_key = _cache_key("pfx", str(asn))
-    cached = _read_cache(cache_key)
+    cached = _read_cache(cache_key, ttl=RIPESTAT_CACHE_TTL)
     if cached is not None:
         return cached
 
@@ -160,7 +161,7 @@ def _fetch_prefixes_for_asn(asn: int) -> List[str]:
     except Exception as e:
         print(f"[ASPath] Error fetching prefixes for AS{asn}: {e}")
 
-    _write_cache(cache_key, prefixes)
+    _write_cache(cache_key, prefixes, ttl=RIPESTAT_CACHE_TTL)
     return prefixes
 
 
