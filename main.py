@@ -481,14 +481,22 @@ async def discover_summary(
         print(f"[Summary] Zenlayer net_ids: {zenlayer_net_ids}")
         print(f"[Summary] Zenlayer IX IDs: {sorted(list(zl_ix_ids))[:10] if zl_ix_ids else 'NONE'} (total: {len(zl_ix_ids)})")
 
-        # Fetch IX members per-IX for better cache reuse across locations
-        # Each IX is cached individually for 7 days, so subsequent requests are instant
+        # Fetch IX members with aggressive timeout to prevent hanging
+        # Failed IXes are skipped - better to have partial data than wait forever
         if zl_ix_ids:
-            print(f"[Summary] Fetching IX members for {len(zl_ix_ids)} IXes (cached individually)...")
+            print(f"[Summary] Fetching IX members for {len(zl_ix_ids)} IXes...")
+            successful = 0
+            failed = 0
             for ix_id in zl_ix_ids:
-                for rec in fetch_peeringdb(f"netixlan?ix_id={ix_id}", timeout=30):
-                    if rec.get("asn"):
-                        ix_member_asns.add(rec["asn"])
+                members = fetch_peeringdb(f"netixlan?ix_id={ix_id}", timeout=8)
+                if members:
+                    successful += 1
+                    for rec in members:
+                        if rec.get("asn"):
+                            ix_member_asns.add(rec["asn"])
+                else:
+                    failed += 1
+            print(f"[Summary] IX fetch complete: {successful} successful, {failed} failed/empty")
 
         ix_member_asns -= local_set
 
@@ -621,16 +629,24 @@ async def get_routing_flow(
             for ix in ix_data:
                 ix_names[ix["id"]] = ix.get("name", f"IX-{ix['id']}")
 
-            # Fetch IX members per-IX for better cache reuse across locations
-            # Each IX is cached individually for 7 days, so subsequent requests are instant
-            print(f"[RoutingFlow] Fetching IX members for {len(zl_ix_ids)} IXes (cached individually)...")
+            # Fetch IX members with aggressive timeout to prevent hanging
+            # Failed IXes are skipped - better to have partial data than wait forever
+            print(f"[RoutingFlow] Fetching IX members for {len(zl_ix_ids)} IXes...")
+            successful = 0
+            failed = 0
             for ix_id in zl_ix_ids:
-                for rec in fetch_peeringdb(f"netixlan?ix_id={ix_id}", timeout=30):
-                    asn = rec.get("asn")
-                    if asn and asn not in local_set:
-                        ix_member_asns.add(asn)
-                        if ix_id:
-                            asn_to_shared_ixes.setdefault(asn, []).append(ix_id)
+                members = fetch_peeringdb(f"netixlan?ix_id={ix_id}", timeout=8)
+                if members:
+                    successful += 1
+                    for rec in members:
+                        asn = rec.get("asn")
+                        if asn and asn not in local_set:
+                            ix_member_asns.add(asn)
+                            if ix_id:
+                                asn_to_shared_ixes.setdefault(asn, []).append(ix_id)
+                else:
+                    failed += 1
+            print(f"[RoutingFlow] IX fetch complete: {successful} successful, {failed} failed/empty")
 
         # ==================================================================
         # AS-Path Frequency Analysis  (2 API calls per local ASN, cached)
