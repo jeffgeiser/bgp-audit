@@ -463,14 +463,14 @@ async def discover_summary(
         # Step 1: Get all IXes at the target facilities
         if fac_id:
             target_fac_ids = [fac_id]
-        elif location_name:
+        elif location:
             if location_type == "metro":
                 config = load_config()
                 mapping = config.get("METRO_MAP", {})
-                cities_in_metro = [city for city, m in mapping.items() if m == location_name]
+                cities_in_metro = [city for city, m in mapping.items() if m == location]
                 target_fac_ids = [f["id"] for f in zenlayer_state["facilities"] if f.get("city") in cities_in_metro]
             else:
-                target_fac_ids = [f["id"] for f in zenlayer_state["facilities"] if f.get("city") == location_name]
+                target_fac_ids = [f["id"] for f in zenlayer_state["facilities"] if f.get("city") == location]
         else:
             target_fac_ids = []
 
@@ -504,7 +504,7 @@ async def discover_summary(
                                 "name_long": ix.get("name_long", ""),
                             })
 
-        print(f"[Summary] {location_name}: {len(local_ixes)} local IXes where Zenlayer is present")
+        print(f"[Summary] {location}: {len(local_ixes)} local IXes where Zenlayer is present")
 
         # Simplified classification without global IX checking
         # Direct On-Net: BGP peers at the facility
