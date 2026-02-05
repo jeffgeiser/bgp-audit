@@ -189,6 +189,22 @@
                         </div>
                     </div>
                 </div>
+
+                <!-- Export Button -->
+                <button
+                    @click="exportData"
+                    :disabled="!scopeId || loading"
+                    class="px-4 py-2 rounded-xl text-[10px] font-black uppercase tracking-wider transition-all shadow-sm"
+                    :class="scopeId && !loading ? 'bg-[#00A9E0] text-white hover:bg-[#0090c0] hover:shadow-md' : 'bg-slate-100 text-slate-400 cursor-not-allowed'"
+                    title="Export current view as CSV"
+                >
+                    <div class="flex items-center gap-2">
+                        <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 10v6m0 0l-3-3m3 3l3-3m2 8H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
+                        </svg>
+                        <span>Export CSV</span>
+                    </div>
+                </button>
             </div>
         </header>
 
@@ -490,6 +506,21 @@
                     } finally {
                         this.loading = false;
                     }
+                },
+
+                exportData() {
+                    if (!this.scopeId) return;
+
+                    // Build export URL with current filters
+                    let url = `/audit/api/export?category=${this.viewMode}`;
+                    if (this.isMarketScope) {
+                        url += `&location=${encodeURIComponent(this.selectedCity)}`;
+                    } else {
+                        url += `&fac_id=${this.selectedFacId}`;
+                    }
+
+                    // Trigger download
+                    window.location.href = url;
                 }
             };
         }
