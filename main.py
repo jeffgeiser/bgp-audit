@@ -107,7 +107,7 @@ def _fetch_as_path(asn: int) -> List[List[int]]:
     # Step 1 – get announced prefixes for this ASN
     prefixes = _fetch_prefixes_for_asn(asn)
     if not prefixes:
-        _write_cache(cache_key, paths, ttl=RIPESTAT_CACHE_TTL)
+        print(f"[ASPath] No prefixes found for AS{asn}, skipping cache")
         return paths
 
     # Step 2 – pick a sample prefix (first one) and pull its looking-glass
@@ -135,10 +135,15 @@ def _fetch_as_path(asn: int) -> List[List[int]]:
                         seen.add(path_key)
                         paths.append(int_path)
             print(f"[ASPath] AS{asn} prefix {sample_prefix}: {len(paths)} unique paths")
+
+            # Only cache successful results
+            if paths:
+                _write_cache(cache_key, paths, ttl=RIPESTAT_CACHE_TTL)
+        else:
+            print(f"[ASPath] Bad response for {sample_prefix}: status {resp.status_code}")
     except Exception as e:
         print(f"[ASPath] Error fetching looking-glass for {sample_prefix}: {e}")
 
-    _write_cache(cache_key, paths, ttl=RIPESTAT_CACHE_TTL)
     return paths
 
 
@@ -158,10 +163,16 @@ def _fetch_prefixes_for_asn(asn: int) -> List[str]:
                 pfx = p.get("prefix")
                 if pfx:
                     prefixes.append(pfx)
+
+            # Only cache successful results
+            if prefixes:
+                _write_cache(cache_key, prefixes, ttl=RIPESTAT_CACHE_TTL)
+                print(f"[ASPath] Cached {len(prefixes)} prefixes for AS{asn}")
+        else:
+            print(f"[ASPath] Bad response for AS{asn} prefixes: status {resp.status_code}")
     except Exception as e:
         print(f"[ASPath] Error fetching prefixes for AS{asn}: {e}")
 
-    _write_cache(cache_key, prefixes, ttl=RIPESTAT_CACHE_TTL)
     return prefixes
 
 
