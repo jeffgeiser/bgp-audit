@@ -5,6 +5,7 @@ import time
 import hashlib
 import requests
 import functools
+import peeringdb
 from fastapi import FastAPI, Request, HTTPException
 from fastapi.responses import HTMLResponse, JSONResponse, StreamingResponse
 from fastapi.templating import Jinja2Templates
@@ -30,6 +31,10 @@ DEFAULT_CONFIG = {
         "Palo Alto": "Silicon Valley (SJC)"
     }
 }
+
+# PeeringDB configuration
+PEERINGDB_API_KEY = os.environ.get("PEERINGDB_API_KEY", "")
+PEERINGDB_DB_PATH = os.environ.get("PEERINGDB_DB_PATH", "/app/data/peeringdb.sqlite3")
 
 
 # ---------------------------------------------------------------------------
@@ -269,29 +274,127 @@ def save_config(data: Dict[str, Any]):
     with open(CONFIG_FILE, 'w') as f:
         json.dump(data, f, indent=4)
 
-def fetch_peeringdb(endpoint: str, timeout: int = 10) -> List[Dict[str, Any]]:
-    """Fetches data from PeeringDB with 7-day file cache."""
-    clean_endpoint = endpoint.strip("/")
-    cache_key = _cache_key("pdb", clean_endpoint)
-
-    cached = _read_cache(cache_key)
-    if cached is not None:
-        return cached
-
-    url = f"{PEERINGDB_BASE}/{clean_endpoint}"
+def initialize_peeringdb():
+    """Initialize PeeringDB local database."""
     try:
-        response = requests.get(url, timeout=timeout)
-        response.raise_for_status()
-        data = response.json().get("data", [])
-        _write_cache(cache_key, data)
-        return data
-    except requests.exceptions.RequestException as e:
-        print(f"PeeringDB API Error: {e}")
+        print("[PeeringDB] Initializing local database...")
+
+        # Configure peeringdb
+        config = peeringdb.config.ClientConfig()
+        config.user = PEERINGDB_API_KEY
+        config.password = ""
+        config.db = PEERINGDB_DB_PATH
+
+        # Initialize the client (this creates/updates the local database)
+        peeringdb.initialize(config)
+
+        print(f"[PeeringDB] Local database initialized at {PEERINGDB_DB_PATH}")
+
+        # Check if sync is needed (database age)
+        if os.path.exists(PEERINGDB_DB_PATH):
+            age_seconds = time.time() - os.path.getmtime(PEERINGDB_DB_PATH)
+            age_days = age_seconds / 86400
+            print(f"[PeeringDB] Database age: {age_days:.1f} days")
+
+            # Auto-sync if database is older than 1 day
+            if age_days > 1:
+                print("[PeeringDB] Database is stale, syncing...")
+                peeringdb.sync()
+                print("[PeeringDB] Sync complete")
+        else:
+            # Initial sync on first run
+            print("[PeeringDB] Performing initial sync (this may take a few minutes)...")
+            peeringdb.sync()
+            print("[PeeringDB] Initial sync complete")
+
+    except Exception as e:
+        print(f"[PeeringDB] Initialization error: {e}")
+        print("[PeeringDB] Will fall back to API calls if needed")
+
+def fetch_peeringdb(endpoint: str, timeout: int = 10) -> List[Dict[str, Any]]:
+    """
+    Query PeeringDB local database instead of API.
+    Parses the endpoint string to determine which model to query and what filters to apply.
+
+    Supported endpoints:
+    - net?asn__in=21859,4229
+    - net?id__in=1,2,3
+    - netfac?net_id__in=1,2,3
+    - netfac?fac_id=123
+    - netfac?fac_id__in=1,2,3
+    - fac?id__in=1,2,3
+    - ixfac?fac_id__in=1,2,3
+    - ix?id__in=1,2,3
+    - netixlan?net_id__in=1,2,3
+    """
+    try:
+        # Parse endpoint
+        parts = endpoint.strip("/").split("?")
+        model_name = parts[0]
+        filters = {}
+
+        if len(parts) > 1:
+            # Parse query parameters
+            for param in parts[1].split("&"):
+                if "=" in param:
+                    key, value = param.split("=", 1)
+
+                    # Handle __in filters
+                    if "__in" in key:
+                        # Convert comma-separated values to list of integers
+                        filters[key] = [int(v.strip()) for v in value.split(",")]
+                    else:
+                        # Single value filter
+                        try:
+                            filters[key] = int(value)
+                        except ValueError:
+                            filters[key] = value
+
+        # Map endpoint names to peeringdb models
+        model_map = {
+            "net": peeringdb.models.Network,
+            "fac": peeringdb.models.Facility,
+            "netfac": peeringdb.models.NetworkFacility,
+            "ix": peeringdb.models.InternetExchange,
+            "ixfac": peeringdb.models.InternetExchangeFacility,
+            "netixlan": peeringdb.models.NetworkIXLan,
+        }
+
+        if model_name not in model_map:
+            print(f"[PeeringDB] Unsupported model: {model_name}")
+            return []
+
+        # Query the local database
+        model_class = model_map[model_name]
+        queryset = model_class.objects.all()
+
+        # Apply filters
+        if filters:
+            queryset = queryset.filter(**filters)
+
+        # Convert queryset to list of dicts
+        results = []
+        for obj in queryset:
+            # Convert model instance to dict
+            obj_dict = {}
+            for field in obj._meta.fields:
+                obj_dict[field.name] = getattr(obj, field.name)
+            results.append(obj_dict)
+
+        print(f"[PeeringDB] Local query '{endpoint}': {len(results)} results")
+        return results
+
+    except Exception as e:
+        print(f"[PeeringDB] Query error for '{endpoint}': {e}")
+        # Fall back to empty list on error
         return []
 
 @app.on_event("startup")
 def initialize_footprint():
     """Build the Zenlayer facility/city/metro map based on dynamic config."""
+    # Initialize PeeringDB local database first
+    initialize_peeringdb()
+
     print("Zenlayer BGP Audit: Loading dynamic configuration...")
     config = load_config()
     zenlayer_state["config"] = config
