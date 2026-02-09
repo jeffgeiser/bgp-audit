@@ -16,7 +16,8 @@ Environment Variables:
 import os
 import sys
 import time
-import peeringdb
+from peeringdb import resource
+from peeringdb.client import Client as PeeringDBClient
 
 def main():
     """Sync PeeringDB local database."""
@@ -31,14 +32,23 @@ def main():
     print(f"Database path: {db_path}")
 
     try:
-        # Configure peeringdb
-        config = peeringdb.config.ClientConfig()
-        config.user = api_key
-        config.password = ""
-        config.db = db_path
+        # Configure peeringdb client
+        cfg = {
+            "sync": {
+                "url": "https://www.peeringdb.com/api",
+                "user": api_key,
+                "password": "",
+                "strip_tz": 1,
+                "timeout": 0,
+            },
+            "orm": {
+                "database": db_path,
+                "backend": "django_peeringdb",
+            }
+        }
 
         # Initialize the client
-        peeringdb.initialize(config)
+        pdb = PeeringDBClient(cfg=cfg)
 
         # Check database age before sync
         if os.path.exists(db_path):
@@ -49,7 +59,7 @@ def main():
         # Perform sync
         print("Syncing with PeeringDB...")
         start_time = time.time()
-        peeringdb.sync()
+        pdb.update_all()
         duration = time.time() - start_time
 
         # Report results
@@ -61,16 +71,25 @@ def main():
             print(f"Database size: {size_mb:.1f} MB")
 
             # Count records
-            print("Database stats:")
-            print(f"  Networks: {peeringdb.models.Network.objects.count()}")
-            print(f"  Facilities: {peeringdb.models.Facility.objects.count()}")
-            print(f"  Internet Exchanges: {peeringdb.models.InternetExchange.objects.count()}")
+            try:
+                net_count = len(pdb.all(resource.Network))
+                fac_count = len(pdb.all(resource.Facility))
+                ix_count = len(pdb.all(resource.InternetExchange))
+
+                print("Database stats:")
+                print(f"  Networks: {net_count}")
+                print(f"  Facilities: {fac_count}")
+                print(f"  Internet Exchanges: {ix_count}")
+            except Exception as e:
+                print(f"  (Could not retrieve stats: {e})")
 
         print(f"[{time.strftime('%Y-%m-%d %H:%M:%S')}] Sync complete")
         sys.exit(0)
 
     except Exception as e:
         print(f"ERROR: Sync failed: {e}")
+        import traceback
+        traceback.print_exc()
         sys.exit(1)
 
 if __name__ == "__main__":
