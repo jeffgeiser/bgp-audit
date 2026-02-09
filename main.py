@@ -5,7 +5,8 @@ import time
 import hashlib
 import requests
 import functools
-import peeringdb
+from peeringdb import resource
+from peeringdb.client import Client as PeeringDBClient
 from fastapi import FastAPI, Request, HTTPException
 from fastapi.responses import HTMLResponse, JSONResponse, StreamingResponse
 from fastapi.templating import Jinja2Templates
@@ -35,6 +36,9 @@ DEFAULT_CONFIG = {
 # PeeringDB configuration
 PEERINGDB_API_KEY = os.environ.get("PEERINGDB_API_KEY", "")
 PEERINGDB_DB_PATH = os.environ.get("PEERINGDB_DB_PATH", "/app/data/peeringdb.sqlite3")
+
+# Global PeeringDB client instance
+pdb_client = None
 
 
 # ---------------------------------------------------------------------------
@@ -276,17 +280,28 @@ def save_config(data: Dict[str, Any]):
 
 def initialize_peeringdb():
     """Initialize PeeringDB local database."""
+    global pdb_client
+
     try:
         print("[PeeringDB] Initializing local database...")
 
-        # Configure peeringdb
-        config = peeringdb.config.ClientConfig()
-        config.user = PEERINGDB_API_KEY
-        config.password = ""
-        config.db = PEERINGDB_DB_PATH
+        # Configure peeringdb client
+        cfg = {
+            "sync": {
+                "url": "https://www.peeringdb.com/api",
+                "user": PEERINGDB_API_KEY,
+                "password": "",
+                "strip_tz": 1,
+                "timeout": 0,
+            },
+            "orm": {
+                "database": PEERINGDB_DB_PATH,
+                "backend": "django_peeringdb",
+            }
+        }
 
-        # Initialize the client (this creates/updates the local database)
-        peeringdb.initialize(config)
+        # Initialize the client
+        pdb_client = PeeringDBClient(cfg=cfg)
 
         print(f"[PeeringDB] Local database initialized at {PEERINGDB_DB_PATH}")
 
@@ -299,22 +314,24 @@ def initialize_peeringdb():
             # Auto-sync if database is older than 1 day
             if age_days > 1:
                 print("[PeeringDB] Database is stale, syncing...")
-                peeringdb.sync()
+                pdb_client.update_all()
                 print("[PeeringDB] Sync complete")
         else:
             # Initial sync on first run
             print("[PeeringDB] Performing initial sync (this may take a few minutes)...")
-            peeringdb.sync()
+            pdb_client.update_all()
             print("[PeeringDB] Initial sync complete")
 
     except Exception as e:
         print(f"[PeeringDB] Initialization error: {e}")
+        import traceback
+        traceback.print_exc()
         print("[PeeringDB] Will fall back to API calls if needed")
 
 def fetch_peeringdb(endpoint: str, timeout: int = 10) -> List[Dict[str, Any]]:
     """
-    Query PeeringDB local database instead of API.
-    Parses the endpoint string to determine which model to query and what filters to apply.
+    Query PeeringDB local database using the peeringdb-py client.
+    Parses the endpoint string to determine which resource to query and what filters to apply.
 
     Supported endpoints:
     - net?asn__in=21859,4229
@@ -327,7 +344,14 @@ def fetch_peeringdb(endpoint: str, timeout: int = 10) -> List[Dict[str, Any]]:
     - ix?id__in=1,2,3
     - netixlan?net_id__in=1,2,3
     """
+    global pdb_client
+
     try:
+        # If client not initialized, return empty list
+        if pdb_client is None:
+            print(f"[PeeringDB] Client not initialized, skipping query: {endpoint}")
+            return []
+
         # Parse endpoint
         parts = endpoint.strip("/").split("?")
         model_name = parts[0]
@@ -339,10 +363,16 @@ def fetch_peeringdb(endpoint: str, timeout: int = 10) -> List[Dict[str, Any]]:
                 if "=" in param:
                     key, value = param.split("=", 1)
 
-                    # Handle __in filters
+                    # Handle __in filters - convert to list
                     if "__in" in key:
+                        # Remove __in suffix for peeringdb-py filter syntax
+                        key_base = key.replace("__in", "")
                         # Convert comma-separated values to list of integers
-                        filters[key] = [int(v.strip()) for v in value.split(",")]
+                        try:
+                            filters[f"{key_base}__in"] = [int(v.strip()) for v in value.split(",")]
+                        except ValueError:
+                            # If not integers, keep as strings
+                            filters[f"{key_base}__in"] = [v.strip() for v in value.split(",")]
                     else:
                         # Single value filter
                         try:
@@ -350,42 +380,47 @@ def fetch_peeringdb(endpoint: str, timeout: int = 10) -> List[Dict[str, Any]]:
                         except ValueError:
                             filters[key] = value
 
-        # Map endpoint names to peeringdb models
-        model_map = {
-            "net": peeringdb.models.Network,
-            "fac": peeringdb.models.Facility,
-            "netfac": peeringdb.models.NetworkFacility,
-            "ix": peeringdb.models.InternetExchange,
-            "ixfac": peeringdb.models.InternetExchangeFacility,
-            "netixlan": peeringdb.models.NetworkIXLan,
+        # Map endpoint names to peeringdb resources
+        resource_map = {
+            "net": resource.Network,
+            "fac": resource.Facility,
+            "netfac": resource.NetworkFacility,
+            "ix": resource.InternetExchange,
+            "ixfac": resource.InternetExchangeFacility,
+            "netixlan": resource.NetworkIXLan,
         }
 
-        if model_name not in model_map:
-            print(f"[PeeringDB] Unsupported model: {model_name}")
+        if model_name not in resource_map:
+            print(f"[PeeringDB] Unsupported resource: {model_name}")
             return []
 
-        # Query the local database
-        model_class = model_map[model_name]
-        queryset = model_class.objects.all()
+        # Query the local database using peeringdb-py client
+        res_type = resource_map[model_name]
 
-        # Apply filters
+        # Use all() method with filters
         if filters:
-            queryset = queryset.filter(**filters)
+            results = pdb_client.all(res_type, **filters)
+        else:
+            results = pdb_client.all(res_type)
 
-        # Convert queryset to list of dicts
-        results = []
-        for obj in queryset:
-            # Convert model instance to dict
+        # Convert to list of dicts
+        output = []
+        for obj in results:
+            # Convert object to dict (peeringdb objects have __dict__ or similar)
             obj_dict = {}
-            for field in obj._meta.fields:
-                obj_dict[field.name] = getattr(obj, field.name)
-            results.append(obj_dict)
+            # Get all attributes from the object
+            for attr in dir(obj):
+                if not attr.startswith('_') and not callable(getattr(obj, attr)):
+                    obj_dict[attr] = getattr(obj, attr)
+            output.append(obj_dict)
 
-        print(f"[PeeringDB] Local query '{endpoint}': {len(results)} results")
-        return results
+        print(f"[PeeringDB] Local query '{endpoint}': {len(output)} results")
+        return output
 
     except Exception as e:
         print(f"[PeeringDB] Query error for '{endpoint}': {e}")
+        import traceback
+        traceback.print_exc()
         # Fall back to empty list on error
         return []
 
