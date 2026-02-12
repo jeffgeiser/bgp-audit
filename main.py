@@ -305,10 +305,16 @@ def _initialize_peeringdb_sync():
             }
         }
 
-        # Initialize the client
+        # Initialize the client (this sets up Django)
         pdb_client = PeeringDBClient(cfg=cfg)
 
         print(f"[PeeringDB] Local database initialized at {PEERINGDB_DB_PATH}")
+
+        # Run Django migrations to create database schema
+        from django.core.management import call_command
+        print("[PeeringDB] Creating database schema...")
+        call_command('migrate', '--run-syncdb', verbosity=0)
+        print("[PeeringDB] Database schema created")
 
         # Check if sync is needed (database age)
         if os.path.exists(PEERINGDB_DB_PATH):
@@ -316,9 +322,12 @@ def _initialize_peeringdb_sync():
             age_days = age_seconds / 86400
             print(f"[PeeringDB] Database age: {age_days:.1f} days")
 
-            # Auto-sync if database is older than 1 day
-            if age_days > 1:
-                print("[PeeringDB] Database is stale, syncing...")
+            # Check if database has data (non-zero size beyond schema)
+            size_mb = os.path.getsize(PEERINGDB_DB_PATH) / (1024 * 1024)
+
+            # Auto-sync if database is older than 1 day or very small (just schema)
+            if age_days > 1 or size_mb < 1:
+                print("[PeeringDB] Database needs sync, syncing...")
                 pdb_client.update_all()
                 print("[PeeringDB] Sync complete")
         else:
