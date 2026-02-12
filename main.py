@@ -5,6 +5,8 @@ import time
 import hashlib
 import requests
 import functools
+import asyncio
+from concurrent.futures import ThreadPoolExecutor
 from peeringdb import resource
 from peeringdb.client import Client as PeeringDBClient
 from fastapi import FastAPI, Request, HTTPException
@@ -278,8 +280,8 @@ def save_config(data: Dict[str, Any]):
     with open(CONFIG_FILE, 'w') as f:
         json.dump(data, f, indent=4)
 
-def initialize_peeringdb():
-    """Initialize PeeringDB local database."""
+def _initialize_peeringdb_sync():
+    """Initialize PeeringDB local database (runs in thread)."""
     global pdb_client
 
     try:
@@ -330,6 +332,11 @@ def initialize_peeringdb():
         import traceback
         traceback.print_exc()
         print("[PeeringDB] Will fall back to API calls if needed")
+
+async def initialize_peeringdb():
+    """Initialize PeeringDB in background thread to avoid async issues."""
+    loop = asyncio.get_event_loop()
+    await loop.run_in_executor(None, _initialize_peeringdb_sync)
 
 def fetch_peeringdb(endpoint: str, timeout: int = 10) -> List[Dict[str, Any]]:
     """
@@ -400,15 +407,14 @@ def fetch_peeringdb(endpoint: str, timeout: int = 10) -> List[Dict[str, Any]]:
         # Query the local database using peeringdb-py client
         res_type = resource_map[model_name]
 
-        # Use all() method with filters
+        # Use all() method and chain filter() if needed
+        queryset = pdb_client.all(res_type)
         if filters:
-            results = pdb_client.all(res_type, **filters)
-        else:
-            results = pdb_client.all(res_type)
+            queryset = queryset.filter(**filters)
 
         # Convert to list of dicts
         output = []
-        for obj in results:
+        for obj in queryset:
             # Convert object to dict (peeringdb objects have __dict__ or similar)
             obj_dict = {}
             # Get all attributes from the object
@@ -428,10 +434,10 @@ def fetch_peeringdb(endpoint: str, timeout: int = 10) -> List[Dict[str, Any]]:
         return []
 
 @app.on_event("startup")
-def initialize_footprint():
+async def initialize_footprint():
     """Build the Zenlayer facility/city/metro map based on dynamic config."""
-    # Initialize PeeringDB local database first
-    initialize_peeringdb()
+    # Initialize PeeringDB local database first (in background thread)
+    await initialize_peeringdb()
 
     print("Zenlayer BGP Audit: Loading dynamic configuration...")
     config = load_config()
