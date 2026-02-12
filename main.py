@@ -334,13 +334,22 @@ def _initialize_peeringdb_sync():
             # Auto-sync if database is older than 1 day or very small (just schema)
             if age_days > 1 or size_mb < 1:
                 print("[PeeringDB] Database needs sync, syncing...")
-                pdb_client.update_all()
-                print("[PeeringDB] Sync complete")
+                try:
+                    pdb_client.update_all()
+                    print("[PeeringDB] Sync complete")
+                except Exception as sync_error:
+                    print(f"[PeeringDB] Sync failed (likely rate limited): {sync_error}")
+                    print("[PeeringDB] Will continue with existing database and retry later")
         else:
             # Initial sync on first run
             print("[PeeringDB] Performing initial sync (this may take a few minutes)...")
-            pdb_client.update_all()
-            print("[PeeringDB] Initial sync complete")
+            try:
+                pdb_client.update_all()
+                print("[PeeringDB] Initial sync complete")
+            except Exception as sync_error:
+                print(f"[PeeringDB] Initial sync failed (likely rate limited): {sync_error}")
+                print("[PeeringDB] Will continue without local database")
+                pdb_client = None  # Disable local database if sync fails
 
     except Exception as e:
         print(f"[PeeringDB] Initialization error: {e}")
