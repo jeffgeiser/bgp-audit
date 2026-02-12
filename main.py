@@ -316,11 +316,21 @@ def _initialize_peeringdb_sync():
 
         print(f"[PeeringDB] Local database initialized at {PEERINGDB_DB_PATH}")
 
-        # Run Django migrations to create database schema
-        from django.core.management import call_command
-        print("[PeeringDB] Creating database schema...")
-        call_command('migrate', '--run-syncdb', verbosity=0)
-        print("[PeeringDB] Database schema created")
+        # Check if database has data (non-zero size)
+        db_size_mb = 0
+        if os.path.exists(PEERINGDB_DB_PATH):
+            db_size_mb = os.path.getsize(PEERINGDB_DB_PATH) / (1024 * 1024)
+            print(f"[PeeringDB] Database file size: {db_size_mb:.1f} MB")
+
+        # Only run migrations if database is empty or very small (just schema)
+        if db_size_mb < 1:
+            # Run Django migrations to create database schema
+            from django.core.management import call_command
+            print("[PeeringDB] Creating database schema...")
+            call_command('migrate', '--run-syncdb', verbosity=0)
+            print("[PeeringDB] Database schema created")
+        else:
+            print(f"[PeeringDB] Database already exists with data, skipping migrations")
 
         # Check if sync is needed (database age)
         if os.path.exists(PEERINGDB_DB_PATH):
@@ -328,8 +338,9 @@ def _initialize_peeringdb_sync():
             age_days = age_seconds / 86400
             print(f"[PeeringDB] Database age: {age_days:.1f} days")
 
-            # Check if database has data (non-zero size beyond schema)
+            # Re-check size after potential migrations
             size_mb = os.path.getsize(PEERINGDB_DB_PATH) / (1024 * 1024)
+            print(f"[PeeringDB] Current database size: {size_mb:.1f} MB")
 
             # Auto-sync if database is older than 1 day or very small (just schema)
             if age_days > 1 or size_mb < 1:
