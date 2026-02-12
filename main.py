@@ -295,8 +295,11 @@ def initialize_peeringdb():
                 "timeout": 0,
             },
             "orm": {
-                "database": PEERINGDB_DB_PATH,
                 "backend": "django_peeringdb",
+                "database": {
+                    "engine": "sqlite3",
+                    "name": PEERINGDB_DB_PATH,
+                }
             }
         }
 
