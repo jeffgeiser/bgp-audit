@@ -42,8 +42,11 @@ def main():
                 "timeout": 0,
             },
             "orm": {
-                "database": db_path,
                 "backend": "django_peeringdb",
+                "database": {
+                    "engine": "sqlite3",
+                    "name": db_path,
+                }
             }
         }
 
