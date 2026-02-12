@@ -291,8 +291,6 @@ def _initialize_peeringdb_sync():
         cfg = {
             "sync": {
                 "url": "https://www.peeringdb.com/api",
-                "user": PEERINGDB_API_KEY,
-                "password": "",
                 "strip_tz": 1,
                 "timeout": 0,
             },
@@ -304,6 +302,14 @@ def _initialize_peeringdb_sync():
                 }
             }
         }
+
+        # Add authentication only if API key is provided
+        if PEERINGDB_API_KEY:
+            print(f"[PeeringDB] Using API key for authentication")
+            cfg["sync"]["user"] = PEERINGDB_API_KEY
+            cfg["sync"]["password"] = ""
+        else:
+            print(f"[PeeringDB] No API key provided, using anonymous access")
 
         # Initialize the client (this sets up Django)
         pdb_client = PeeringDBClient(cfg=cfg)
