@@ -333,11 +333,6 @@ def _initialize_peeringdb_sync():
         traceback.print_exc()
         print("[PeeringDB] Will fall back to API calls if needed")
 
-async def initialize_peeringdb():
-    """Initialize PeeringDB in background thread to avoid async issues."""
-    loop = asyncio.get_event_loop()
-    await loop.run_in_executor(None, _initialize_peeringdb_sync)
-
 def fetch_peeringdb(endpoint: str, timeout: int = 10) -> List[Dict[str, Any]]:
     """
     Query PeeringDB local database using the peeringdb-py client.
@@ -433,23 +428,19 @@ def fetch_peeringdb(endpoint: str, timeout: int = 10) -> List[Dict[str, Any]]:
         # Fall back to empty list on error
         return []
 
-@app.on_event("startup")
-async def initialize_footprint():
-    """Build the Zenlayer facility/city/metro map based on dynamic config."""
-    # Initialize PeeringDB local database first (in background thread)
-    await initialize_peeringdb()
-
+def _initialize_footprint_sync():
+    """Build the Zenlayer facility/city/metro map (runs in thread)."""
     print("Zenlayer BGP Audit: Loading dynamic configuration...")
     config = load_config()
     zenlayer_state["config"] = config
-    
+
     asns = config.get("ASNS", DEFAULT_CONFIG["ASNS"])
     asn_query = ",".join(map(str, asns))
-    
+
     nets = fetch_peeringdb(f"net?asn__in={asn_query}")
     zenlayer_state["networks"] = nets
     net_ids = [n["id"] for n in nets]
-    
+
     if not net_ids:
         print(f"Warning: No networks found for ASNs {asn_query}.")
         zenlayer_state["unique_cities"] = []
@@ -463,10 +454,10 @@ async def initialize_footprint():
         facilities = fetch_peeringdb(f"fac?id__in={','.join(map(str, fac_ids))}")
         print(f"[Footprint] Loaded {len(facilities)} total facilities")
         mapping = config.get("METRO_MAP", {})
-        
+
         cities = set()
         metros = set()
-        
+
         for fac in facilities:
             city = fac.get("city")
             if city:
@@ -475,7 +466,7 @@ async def initialize_footprint():
                     metro_name = mapping[city]
                     fac["metro"] = metro_name
                     metros.add(metro_name)
-                
+
         zenlayer_state["facilities"] = sorted(facilities, key=lambda x: x["name"])
         zenlayer_state["unique_cities"] = sorted(list(cities))
         zenlayer_state["unique_metros"] = sorted(list(metros))
@@ -486,6 +477,14 @@ async def initialize_footprint():
         print(f"[Footprint] Facilities per city: {dict(city_counts)}")
 
     print(f"Zenlayer BGP Audit: Footprint loaded. ASNs: {asns}, Metros: {len(zenlayer_state['unique_metros'])}, Cities: {len(zenlayer_state['unique_cities'])}")
+
+@app.on_event("startup")
+async def initialize_footprint():
+    """Initialize PeeringDB and footprint in background thread."""
+    # Run both PeeringDB initialization and footprint loading in thread
+    loop = asyncio.get_event_loop()
+    await loop.run_in_executor(None, _initialize_peeringdb_sync)
+    await loop.run_in_executor(None, _initialize_footprint_sync)
 @app.get("/", response_class=HTMLResponse)
 @app.get("", response_class=HTMLResponse)
 async def dashboard_home(request: Request):
