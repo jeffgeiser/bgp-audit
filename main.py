@@ -316,21 +316,31 @@ def _initialize_peeringdb_sync():
 
         print(f"[PeeringDB] Local database initialized at {PEERINGDB_DB_PATH}")
 
-        # Check if database has data (non-zero size)
-        db_size_mb = 0
+        # Check if database tables already exist by querying Django
+        tables_exist = False
         if os.path.exists(PEERINGDB_DB_PATH):
             db_size_mb = os.path.getsize(PEERINGDB_DB_PATH) / (1024 * 1024)
             print(f"[PeeringDB] Database file size: {db_size_mb:.1f} MB")
 
-        # Only run migrations if database is empty or very small (just schema)
-        if db_size_mb < 1:
+            # Check if tables exist
+            try:
+                from django.db import connection
+                with connection.cursor() as cursor:
+                    cursor.execute("SELECT name FROM sqlite_master WHERE type='table' AND name='peeringdb_organization';")
+                    result = cursor.fetchone()
+                    tables_exist = result is not None
+                    if tables_exist:
+                        print(f"[PeeringDB] Database tables already exist, skipping migrations")
+            except Exception as e:
+                print(f"[PeeringDB] Could not check tables: {e}")
+
+        # Only run migrations if tables don't exist
+        if not tables_exist:
             # Run Django migrations to create database schema
             from django.core.management import call_command
             print("[PeeringDB] Creating database schema...")
-            call_command('migrate', '--run-syncdb', verbosity=0)
+            call_command('migrate', verbosity=0)
             print("[PeeringDB] Database schema created")
-        else:
-            print(f"[PeeringDB] Database already exists with data, skipping migrations")
 
         # Check if sync is needed (database age)
         if os.path.exists(PEERINGDB_DB_PATH):
