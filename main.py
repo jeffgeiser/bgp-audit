@@ -425,12 +425,21 @@ def fetch_peeringdb(endpoint: str, timeout: int = 10) -> List[Dict[str, Any]]:
         # Convert to list of dicts
         output = []
         for obj in queryset:
-            # Convert object to dict (peeringdb objects have __dict__ or similar)
+            # Convert Django model instance to dict using model_to_dict
+            # But we need to get all fields, not just form fields
             obj_dict = {}
-            # Get all attributes from the object
-            for attr in dir(obj):
-                if not attr.startswith('_') and not callable(getattr(obj, attr)):
-                    obj_dict[attr] = getattr(obj, attr)
+
+            # Get all field values from the Django model
+            for field in obj._meta.fields:
+                field_name = field.name
+                field_value = getattr(obj, field_name)
+
+                # Convert datetime objects to ISO format strings
+                if hasattr(field_value, 'isoformat'):
+                    obj_dict[field_name] = field_value.isoformat()
+                else:
+                    obj_dict[field_name] = field_value
+
             output.append(obj_dict)
 
         print(f"[PeeringDB] Local query '{endpoint}': {len(output)} results")
