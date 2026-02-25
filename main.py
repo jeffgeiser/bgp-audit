@@ -298,7 +298,12 @@ def initialize_footprint():
         return
 
     netfacs = fetch_peeringdb(f"netfac?net_id__in={','.join(map(str, net_ids))}")
-    fac_ids = list(set([nf["fac_id"] for nf in netfacs]))
+    # Handle both API format (fac_id) and local DB format (fac or fac_id)
+    fac_ids = list(set([
+        nf.get("fac_id") or nf.get("fac") or nf.get("facility_id")
+        for nf in netfacs
+        if nf.get("fac_id") or nf.get("fac") or nf.get("facility_id")
+    ]))
     
     if fac_ids:
         facilities = fetch_peeringdb(f"fac?id__in={','.join(map(str, fac_ids))}")
@@ -369,7 +374,12 @@ def _get_discovery_data(fac_id: Optional[int], location_name: Optional[str], loc
     if fac_id:
         # Search specifically in one data center
         netfacs = fetch_peeringdb(f"netfac?fac_id={fac_id}")
-        net_ids = [nf["net_id"] for nf in netfacs]
+        # Handle both API format (net_id) and local DB format (net or network_id)
+        net_ids = [
+            nf.get("net_id") or nf.get("net") or nf.get("network_id")
+            for nf in netfacs
+            if nf.get("net_id") or nf.get("net") or nf.get("network_id")
+        ]
     elif location_name:
         # Find relevant facilities
         target_fac_ids = []
@@ -387,7 +397,12 @@ def _get_discovery_data(fac_id: Optional[int], location_name: Optional[str], loc
         if target_fac_ids:
             fac_query = ",".join(map(str, target_fac_ids))
             netfacs = fetch_peeringdb(f"netfac?fac_id__in={fac_query}")
-            net_ids = list(set([nf["net_id"] for nf in netfacs]))
+            # Handle both API format (net_id) and local DB format (net or network_id)
+            net_ids = list(set([
+                nf.get("net_id") or nf.get("net") or nf.get("network_id")
+                for nf in netfacs
+                if nf.get("net_id") or nf.get("net") or nf.get("network_id")
+            ]))
     
     if not net_ids:
         return []
@@ -468,14 +483,16 @@ async def discover_summary(
         if zenlayer_net_ids:
             net_id_query = ",".join(map(str, zenlayer_net_ids))
             for rec in fetch_peeringdb(f"netixlan?net_id__in={net_id_query}"):
-                if rec.get("ix_id"):
-                    zl_ix_ids.add(rec["ix_id"])
+                ix_id = rec.get("ix_id") or rec.get("ix")
+                if ix_id:
+                    zl_ix_ids.add(ix_id)
 
         if zl_ix_ids:
             ix_query = ",".join(map(str, zl_ix_ids))
             for rec in fetch_peeringdb(f"netixlan?ix_id__in={ix_query}"):
-                if rec.get("asn"):
-                    ix_member_asns.add(rec["asn"])
+                asn = rec.get("asn")
+                if asn:
+                    ix_member_asns.add(asn)
 
         ix_member_asns -= local_set
 
@@ -575,7 +592,12 @@ async def get_routing_flow(
         # Get all networks at these facilities
         fac_query = ",".join(map(str, target_fac_ids))
         netfacs = fetch_peeringdb(f"netfac?fac_id__in={fac_query}")
-        net_ids = list(set([nf["net_id"] for nf in netfacs]))
+        # Handle both API format (net_id) and local DB format (net or network_id)
+        net_ids = list(set([
+            nf.get("net_id") or nf.get("net") or nf.get("network_id")
+            for nf in netfacs
+            if nf.get("net_id") or nf.get("net") or nf.get("network_id")
+        ]))
 
         all_nets = []
         batch_size = 50
@@ -604,7 +626,7 @@ async def get_routing_flow(
         if zenlayer_net_ids:
             net_id_query = ",".join(map(str, zenlayer_net_ids))
             for rec in fetch_peeringdb(f"netixlan?net_id__in={net_id_query}"):
-                ix_id = rec.get("ix_id")
+                ix_id = rec.get("ix_id") or rec.get("ix")
                 if ix_id:
                     zl_ix_ids.add(ix_id)
 
@@ -616,12 +638,14 @@ async def get_routing_flow(
             ix_query = ",".join(map(str, zl_ix_ids))
             ix_data = fetch_peeringdb(f"ix?id__in={ix_query}")
             for ix in ix_data:
-                ix_names[ix["id"]] = ix.get("name", f"IX-{ix['id']}")
+                ix_id = ix.get("id")
+                if ix_id:
+                    ix_names[ix_id] = ix.get("name", f"IX-{ix_id}")
 
             # Single batched query for all IX members
             for rec in fetch_peeringdb(f"netixlan?ix_id__in={ix_query}"):
                 asn = rec.get("asn")
-                ix_id = rec.get("ix_id")
+                ix_id = rec.get("ix_id") or rec.get("ix")
                 if asn and asn not in local_set:
                     ix_member_asns.add(asn)
                     if ix_id:
