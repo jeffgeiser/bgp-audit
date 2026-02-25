@@ -475,6 +475,9 @@ def fetch_peeringdb(endpoint: str, timeout: int = 10) -> List[Dict[str, Any]]:
             output.append(obj_dict)
 
         print(f"[PeeringDB] Local query '{endpoint}': {len(output)} results")
+        # Debug: log field names of first record to help diagnose key errors
+        if output:
+            print(f"[PeeringDB] Fields in first '{model_name}' record: {list(output[0].keys())}")
         return output
 
     except Exception as e:
@@ -504,7 +507,11 @@ def _initialize_footprint_sync():
         return
 
     netfacs = fetch_peeringdb(f"netfac?net_id__in={','.join(map(str, net_ids))}")
-    fac_ids = list(set([nf["fac_id"] for nf in netfacs]))
+    # Try both field name variants (API uses 'fac_id', Django model may use 'facility_id')
+    fac_key = "fac_id" if netfacs and "fac_id" in netfacs[0] else "facility_id"
+    if netfacs:
+        print(f"[Footprint] netfac field names: {list(netfacs[0].keys())}")
+    fac_ids = list(set([nf[fac_key] for nf in netfacs if nf.get(fac_key)]))
 
     if fac_ids:
         facilities = fetch_peeringdb(f"fac?id__in={','.join(map(str, fac_ids))}")
