@@ -5,6 +5,10 @@ import time
 import hashlib
 import requests
 import functools
+import asyncio
+from concurrent.futures import ThreadPoolExecutor
+from peeringdb import resource
+from peeringdb.client import Client as PeeringDBClient
 from fastapi import FastAPI, Request, HTTPException
 from fastapi.responses import HTMLResponse, JSONResponse, StreamingResponse
 from fastapi.templating import Jinja2Templates
@@ -31,19 +35,27 @@ DEFAULT_CONFIG = {
     }
 }
 
+# PeeringDB configuration
+PEERINGDB_API_KEY = os.environ.get("PEERINGDB_API_KEY", "")
+PEERINGDB_DB_PATH = os.environ.get("PEERINGDB_DB_PATH", "/app/data/peeringdb.sqlite3")
+
+# Global PeeringDB client instance
+pdb_client = None
+
 
 # ---------------------------------------------------------------------------
-# File-based JSON cache with 24-hour TTL
+# File-based JSON cache with configurable TTL
 # ---------------------------------------------------------------------------
 CACHE_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), ".api_cache")
-CACHE_TTL = 86400  # 24 hours in seconds
+CACHE_TTL = 604800  # 7 days in seconds (PeeringDB data is relatively static)
+RIPESTAT_CACHE_TTL = 432000  # 5 days in seconds (AS-path data changes infrequently)
 
 def _cache_key(prefix: str, value: str) -> str:
     """Generate a filesystem-safe cache key."""
     h = hashlib.sha256(value.encode()).hexdigest()[:16]
     return f"{prefix}_{h}"
 
-def _read_cache(key: str):
+def _read_cache(key: str, ttl: int = CACHE_TTL):
     """Read a cached value if it exists and hasn't expired."""
     path = os.path.join(CACHE_DIR, f"{key}.json")
     if not os.path.exists(path):
@@ -51,14 +63,14 @@ def _read_cache(key: str):
     try:
         with open(path, "r") as f:
             entry = json.load(f)
-        if time.time() - entry.get("ts", 0) > CACHE_TTL:
+        if time.time() - entry.get("ts", 0) > ttl:
             os.remove(path)
             return None
         return entry["data"]
     except Exception:
         return None
 
-def _write_cache(key: str, data):
+def _write_cache(key: str, data, ttl: int = CACHE_TTL):
     """Write a value to the file cache."""
     os.makedirs(CACHE_DIR, exist_ok=True)
     path = os.path.join(CACHE_DIR, f"{key}.json")
@@ -93,11 +105,11 @@ def _fetch_as_path(asn: int) -> List[List[int]]:
     Returns a list of integer AS-path lists, e.g.
         [[3356, 1299, 21859], [174, 1299, 21859], ...]
 
-    The full path data is cached per-ASN so repeat calls never hit the
+    The full path data is cached per-ASN for 5 days so repeat calls never hit the
     network.
     """
     cache_key = _cache_key("aspath", str(asn))
-    cached = _read_cache(cache_key)
+    cached = _read_cache(cache_key, ttl=RIPESTAT_CACHE_TTL)
     if cached is not None:
         return cached
 
@@ -106,7 +118,7 @@ def _fetch_as_path(asn: int) -> List[List[int]]:
     # Step 1 – get announced prefixes for this ASN
     prefixes = _fetch_prefixes_for_asn(asn)
     if not prefixes:
-        _write_cache(cache_key, paths)
+        print(f"[ASPath] No prefixes found for AS{asn}, skipping cache")
         return paths
 
     # Step 2 – pick a sample prefix (first one) and pull its looking-glass
@@ -134,17 +146,22 @@ def _fetch_as_path(asn: int) -> List[List[int]]:
                         seen.add(path_key)
                         paths.append(int_path)
             print(f"[ASPath] AS{asn} prefix {sample_prefix}: {len(paths)} unique paths")
+
+            # Only cache successful results
+            if paths:
+                _write_cache(cache_key, paths, ttl=RIPESTAT_CACHE_TTL)
+        else:
+            print(f"[ASPath] Bad response for {sample_prefix}: status {resp.status_code}")
     except Exception as e:
         print(f"[ASPath] Error fetching looking-glass for {sample_prefix}: {e}")
 
-    _write_cache(cache_key, paths)
     return paths
 
 
 def _fetch_prefixes_for_asn(asn: int) -> List[str]:
-    """Return a list of prefixes originated by *asn* (cached)."""
+    """Return a list of prefixes originated by *asn* (cached for 5 days)."""
     cache_key = _cache_key("pfx", str(asn))
-    cached = _read_cache(cache_key)
+    cached = _read_cache(cache_key, ttl=RIPESTAT_CACHE_TTL)
     if cached is not None:
         return cached
 
@@ -157,10 +174,16 @@ def _fetch_prefixes_for_asn(asn: int) -> List[str]:
                 pfx = p.get("prefix")
                 if pfx:
                     prefixes.append(pfx)
+
+            # Only cache successful results
+            if prefixes:
+                _write_cache(cache_key, prefixes, ttl=RIPESTAT_CACHE_TTL)
+                print(f"[ASPath] Cached {len(prefixes)} prefixes for AS{asn}")
+        else:
+            print(f"[ASPath] Bad response for AS{asn} prefixes: status {resp.status_code}")
     except Exception as e:
         print(f"[ASPath] Error fetching prefixes for AS{asn}: {e}")
 
-    _write_cache(cache_key, prefixes)
     return prefixes
 
 
@@ -257,40 +280,221 @@ def save_config(data: Dict[str, Any]):
     with open(CONFIG_FILE, 'w') as f:
         json.dump(data, f, indent=4)
 
-def fetch_peeringdb(endpoint: str) -> List[Dict[str, Any]]:
-    """Fetches data from PeeringDB with 24-hour file cache."""
-    clean_endpoint = endpoint.strip("/")
-    cache_key = _cache_key("pdb", clean_endpoint)
+def _initialize_peeringdb_sync():
+    """Initialize PeeringDB local database (runs in thread)."""
+    global pdb_client
 
-    cached = _read_cache(cache_key)
-    if cached is not None:
-        return cached
-
-    url = f"{PEERINGDB_BASE}/{clean_endpoint}"
     try:
-        response = requests.get(url, timeout=10)
-        response.raise_for_status()
-        data = response.json().get("data", [])
-        _write_cache(cache_key, data)
-        return data
-    except requests.exceptions.RequestException as e:
-        print(f"PeeringDB API Error: {e}")
+        print("[PeeringDB] Initializing local database...")
+
+        # Configure peeringdb client
+        cfg = {
+            "sync": {
+                "url": "https://www.peeringdb.com/api",
+                "strip_tz": 1,
+                "timeout": 0,
+            },
+            "orm": {
+                "backend": "django_peeringdb",
+                "database": {
+                    "engine": "sqlite3",
+                    "name": PEERINGDB_DB_PATH,
+                }
+            }
+        }
+
+        # Add authentication only if API key is provided
+        if PEERINGDB_API_KEY:
+            print(f"[PeeringDB] Using API key for authentication")
+            cfg["sync"]["user"] = PEERINGDB_API_KEY
+            cfg["sync"]["password"] = ""
+        else:
+            print(f"[PeeringDB] No API key provided, using anonymous access")
+
+        # Initialize the client (this sets up Django)
+        pdb_client = PeeringDBClient(cfg=cfg)
+
+        print(f"[PeeringDB] Local database initialized at {PEERINGDB_DB_PATH}")
+
+        # Check if database tables already exist by querying Django
+        tables_exist = False
+        if os.path.exists(PEERINGDB_DB_PATH):
+            db_size_mb = os.path.getsize(PEERINGDB_DB_PATH) / (1024 * 1024)
+            print(f"[PeeringDB] Database file size: {db_size_mb:.1f} MB")
+
+            # Check if tables exist
+            try:
+                from django.db import connection
+                with connection.cursor() as cursor:
+                    cursor.execute("SELECT name FROM sqlite_master WHERE type='table' AND name='peeringdb_organization';")
+                    result = cursor.fetchone()
+                    tables_exist = result is not None
+                    if tables_exist:
+                        print(f"[PeeringDB] Database tables already exist, skipping migrations")
+            except Exception as e:
+                print(f"[PeeringDB] Could not check tables: {e}")
+
+        # Only run migrations if tables don't exist
+        if not tables_exist:
+            # Run Django migrations to create database schema
+            from django.core.management import call_command
+            print("[PeeringDB] Creating database schema...")
+            call_command('migrate', verbosity=0)
+            print("[PeeringDB] Database schema created")
+
+        # Check if sync is needed (database age)
+        if os.path.exists(PEERINGDB_DB_PATH):
+            age_seconds = time.time() - os.path.getmtime(PEERINGDB_DB_PATH)
+            age_days = age_seconds / 86400
+            print(f"[PeeringDB] Database age: {age_days:.1f} days")
+
+            # Re-check size after potential migrations
+            size_mb = os.path.getsize(PEERINGDB_DB_PATH) / (1024 * 1024)
+            print(f"[PeeringDB] Current database size: {size_mb:.1f} MB")
+
+            # Auto-sync if database is older than 1 day or very small (just schema)
+            if age_days > 1 or size_mb < 1:
+                print("[PeeringDB] Database needs sync, syncing...")
+                try:
+                    pdb_client.update_all()
+                    print("[PeeringDB] Sync complete")
+                except Exception as sync_error:
+                    print(f"[PeeringDB] Sync failed (likely rate limited): {sync_error}")
+                    print("[PeeringDB] Will continue with existing database and retry later")
+        else:
+            # Initial sync on first run
+            print("[PeeringDB] Performing initial sync (this may take a few minutes)...")
+            try:
+                pdb_client.update_all()
+                print("[PeeringDB] Initial sync complete")
+            except Exception as sync_error:
+                print(f"[PeeringDB] Initial sync failed (likely rate limited): {sync_error}")
+                print("[PeeringDB] Will continue without local database")
+                pdb_client = None  # Disable local database if sync fails
+
+    except Exception as e:
+        print(f"[PeeringDB] Initialization error: {e}")
+        import traceback
+        traceback.print_exc()
+        print("[PeeringDB] Will fall back to API calls if needed")
+
+def fetch_peeringdb(endpoint: str, timeout: int = 10) -> List[Dict[str, Any]]:
+    """
+    Query PeeringDB local database using the peeringdb-py client.
+    Parses the endpoint string to determine which resource to query and what filters to apply.
+
+    Supported endpoints:
+    - net?asn__in=21859,4229
+    - net?id__in=1,2,3
+    - netfac?net_id__in=1,2,3
+    - netfac?fac_id=123
+    - netfac?fac_id__in=1,2,3
+    - fac?id__in=1,2,3
+    - ixfac?fac_id__in=1,2,3
+    - ix?id__in=1,2,3
+    - netixlan?net_id__in=1,2,3
+    """
+    global pdb_client
+
+    try:
+        # If client not initialized, return empty list
+        if pdb_client is None:
+            print(f"[PeeringDB] Client not initialized, skipping query: {endpoint}")
+            return []
+
+        # Parse endpoint
+        parts = endpoint.strip("/").split("?")
+        model_name = parts[0]
+        filters = {}
+
+        if len(parts) > 1:
+            # Parse query parameters
+            for param in parts[1].split("&"):
+                if "=" in param:
+                    key, value = param.split("=", 1)
+
+                    # Handle __in filters - convert to list
+                    if "__in" in key:
+                        # Remove __in suffix for peeringdb-py filter syntax
+                        key_base = key.replace("__in", "")
+                        # Convert comma-separated values to list of integers
+                        try:
+                            filters[f"{key_base}__in"] = [int(v.strip()) for v in value.split(",")]
+                        except ValueError:
+                            # If not integers, keep as strings
+                            filters[f"{key_base}__in"] = [v.strip() for v in value.split(",")]
+                    else:
+                        # Single value filter
+                        try:
+                            filters[key] = int(value)
+                        except ValueError:
+                            filters[key] = value
+
+        # Map endpoint names to peeringdb resources
+        resource_map = {
+            "net": resource.Network,
+            "fac": resource.Facility,
+            "netfac": resource.NetworkFacility,
+            "ix": resource.InternetExchange,
+            "ixfac": resource.InternetExchangeFacility,
+            "netixlan": resource.NetworkIXLan,
+        }
+
+        if model_name not in resource_map:
+            print(f"[PeeringDB] Unsupported resource: {model_name}")
+            return []
+
+        # Query the local database using peeringdb-py client
+        res_type = resource_map[model_name]
+
+        # Use all() method and chain filter() if needed
+        queryset = pdb_client.all(res_type)
+        if filters:
+            queryset = queryset.filter(**filters)
+
+        # Convert to list of dicts
+        output = []
+        for obj in queryset:
+            # Convert Django model instance to dict using model_to_dict
+            # But we need to get all fields, not just form fields
+            obj_dict = {}
+
+            # Get all field values from the Django model
+            for field in obj._meta.fields:
+                field_name = field.name
+                field_value = getattr(obj, field_name)
+
+                # Convert datetime objects to ISO format strings
+                if hasattr(field_value, 'isoformat'):
+                    obj_dict[field_name] = field_value.isoformat()
+                else:
+                    obj_dict[field_name] = field_value
+
+            output.append(obj_dict)
+
+        print(f"[PeeringDB] Local query '{endpoint}': {len(output)} results")
+        return output
+
+    except Exception as e:
+        print(f"[PeeringDB] Query error for '{endpoint}': {e}")
+        import traceback
+        traceback.print_exc()
+        # Fall back to empty list on error
         return []
 
-@app.on_event("startup")
-def initialize_footprint():
-    """Build the Zenlayer facility/city/metro map based on dynamic config."""
+def _initialize_footprint_sync():
+    """Build the Zenlayer facility/city/metro map (runs in thread)."""
     print("Zenlayer BGP Audit: Loading dynamic configuration...")
     config = load_config()
     zenlayer_state["config"] = config
-    
+
     asns = config.get("ASNS", DEFAULT_CONFIG["ASNS"])
     asn_query = ",".join(map(str, asns))
-    
+
     nets = fetch_peeringdb(f"net?asn__in={asn_query}")
     zenlayer_state["networks"] = nets
     net_ids = [n["id"] for n in nets]
-    
+
     if not net_ids:
         print(f"Warning: No networks found for ASNs {asn_query}.")
         zenlayer_state["unique_cities"] = []
@@ -298,20 +502,16 @@ def initialize_footprint():
         return
 
     netfacs = fetch_peeringdb(f"netfac?net_id__in={','.join(map(str, net_ids))}")
-    # Handle both API format (fac_id) and local DB format (fac or fac_id)
-    fac_ids = list(set([
-        nf.get("fac_id") or nf.get("fac") or nf.get("facility_id")
-        for nf in netfacs
-        if nf.get("fac_id") or nf.get("fac") or nf.get("facility_id")
-    ]))
-    
+    fac_ids = list(set([nf["fac_id"] for nf in netfacs]))
+
     if fac_ids:
         facilities = fetch_peeringdb(f"fac?id__in={','.join(map(str, fac_ids))}")
+        print(f"[Footprint] Loaded {len(facilities)} total facilities")
         mapping = config.get("METRO_MAP", {})
-        
+
         cities = set()
         metros = set()
-        
+
         for fac in facilities:
             city = fac.get("city")
             if city:
@@ -320,12 +520,25 @@ def initialize_footprint():
                     metro_name = mapping[city]
                     fac["metro"] = metro_name
                     metros.add(metro_name)
-                
+
         zenlayer_state["facilities"] = sorted(facilities, key=lambda x: x["name"])
         zenlayer_state["unique_cities"] = sorted(list(cities))
         zenlayer_state["unique_metros"] = sorted(list(metros))
-    
+
+        # Debug: Show facility distribution per city
+        from collections import Counter
+        city_counts = Counter([f.get("city") for f in facilities if f.get("city")])
+        print(f"[Footprint] Facilities per city: {dict(city_counts)}")
+
     print(f"Zenlayer BGP Audit: Footprint loaded. ASNs: {asns}, Metros: {len(zenlayer_state['unique_metros'])}, Cities: {len(zenlayer_state['unique_cities'])}")
+
+@app.on_event("startup")
+async def initialize_footprint():
+    """Initialize PeeringDB and footprint in background thread."""
+    # Run both PeeringDB initialization and footprint loading in thread
+    loop = asyncio.get_event_loop()
+    await loop.run_in_executor(None, _initialize_peeringdb_sync)
+    await loop.run_in_executor(None, _initialize_footprint_sync)
 @app.get("/", response_class=HTMLResponse)
 @app.get("", response_class=HTMLResponse)
 async def dashboard_home(request: Request):
@@ -391,8 +604,11 @@ def _get_discovery_data(fac_id: Optional[int], location_name: Optional[str], loc
             target_fac_ids = [f["id"] for f in zenlayer_state["facilities"] if f.get("city") in cities_in_metro]
         else:
             # location_type == "city"
-            target_fac_ids = [f["id"] for f in zenlayer_state["facilities"] if f.get("city") == location_name]
+            matching_facs = [f for f in zenlayer_state["facilities"] if f.get("city") == location_name]
+            target_fac_ids = [f["id"] for f in matching_facs]
             print(f"[Discovery] City '{location_name}': found {len(target_fac_ids)} facilities: {target_fac_ids}")
+            if matching_facs:
+                print(f"[Discovery] Facility details: {[(f['id'], f['name'], f.get('city')) for f in matching_facs]}")
 
         if target_fac_ids:
             fac_query = ",".join(map(str, target_fac_ids))
@@ -472,648 +688,150 @@ async def discover_summary(
         # AS-Path analysis: find direct peers from Zenlayer's own paths
         direct_peer_asns, _ = _analyze_zenlayer_paths(zenlayer_asns)
         facility_asns = {n["asn"] for n in all_nets if n.get("asn")}
+        direct_at_facility = direct_peer_asns & facility_asns
 
-        # ----- IX detection: use ALL Zenlayer IXes -----
-        zenlayer_net_ids = [
-            n["id"] for n in zenlayer_state.get("networks", [])
-        ]
+        # ----- LOCAL IX detection: Only check IXes at this facility -----
+        # Step 1: Get all IXes at the target facilities
+        if fac_id:
+            target_fac_ids = [fac_id]
+        elif location:
+            if location_type == "metro":
+                config = load_config()
+                mapping = config.get("METRO_MAP", {})
+                cities_in_metro = [city for city, m in mapping.items() if m == location]
+                matching_facs = [f for f in zenlayer_state["facilities"] if f.get("city") in cities_in_metro]
+                target_fac_ids = [f["id"] for f in matching_facs]
+                print(f"[Summary] Metro '{location}' includes cities: {cities_in_metro}")
+                print(f"[Summary] Found {len(target_fac_ids)} facilities in metro")
+            else:
+                matching_facs = [f for f in zenlayer_state["facilities"] if f.get("city") == location]
+                target_fac_ids = [f["id"] for f in matching_facs]
+                print(f"[Summary] City '{location}': {len(target_fac_ids)} facilities found")
+                if matching_facs:
+                    for fac in matching_facs:
+                        print(f"[Summary]   - Fac {fac['id']}: {fac['name']} ({fac.get('city')})")
+        else:
+            target_fac_ids = []
 
-        ix_member_asns: set = set()
-        zl_ix_ids: set = set()
-        if zenlayer_net_ids:
-            net_id_query = ",".join(map(str, zenlayer_net_ids))
-            for rec in fetch_peeringdb(f"netixlan?net_id__in={net_id_query}"):
-                ix_id = rec.get("ix_id") or rec.get("ix")
-                if ix_id:
-                    zl_ix_ids.add(ix_id)
+        local_ixes = []
+        zenlayer_local_ix_ids = set()
+        if target_fac_ids:
+            # Get IXes at these facilities
+            fac_query = ",".join(map(str, target_fac_ids))
+            ixfacs = fetch_peeringdb(f"ixfac?fac_id__in={fac_query}")
+            local_ix_ids = list(set([ixf["ix_id"] for ixf in ixfacs if ixf.get("ix_id")]))
 
-        if zl_ix_ids:
-            ix_query = ",".join(map(str, zl_ix_ids))
-            for rec in fetch_peeringdb(f"netixlan?ix_id__in={ix_query}"):
-                asn = rec.get("asn")
-                if asn:
-                    ix_member_asns.add(asn)
+            if local_ix_ids:
+                # Get IX details
+                ix_query = ",".join(map(str, local_ix_ids))
+                local_ixes_data = fetch_peeringdb(f"ix?id__in={ix_query}")
 
-        ix_member_asns -= local_set
+                # Check which local IXes Zenlayer is connected to
+                zenlayer_net_ids = [n["id"] for n in zenlayer_state.get("networks", [])]
+                if zenlayer_net_ids:
+                    net_id_query = ",".join(map(str, zenlayer_net_ids))
+                    zl_ixlan = fetch_peeringdb(f"netixlan?net_id__in={net_id_query}")
+                    zenlayer_all_ix_ids = set([rec["ix_id"] for rec in zl_ixlan if rec.get("ix_id")])
+                    zenlayer_local_ix_ids = set(local_ix_ids) & zenlayer_all_ix_ids
 
-        # ------------------------------------------------------------------
-        # Classification (new approach):
-        #
-        #   Exchange/IXP    = 1-hop BGP peer AND shares an IX with Zenlayer
-        #   Direct On-Net   = 1-hop BGP peer at facility AND NOT on shared IX
-        #   Upstream Transit= NOT a 1-hop BGP peer
-        #
-        # The IX test takes priority: if a network peers with Zenlayer AND
-        # is a member of the same IX fabric, the session goes over that
-        # exchange regardless of whether a cross-connect also exists.
-        # ------------------------------------------------------------------
-        all_direct_at_facility = direct_peer_asns & facility_asns
+                    # Build list of IXes at this facility that Zenlayer uses
+                    for ix in local_ixes_data:
+                        if ix["id"] in zenlayer_local_ix_ids:
+                            local_ixes.append({
+                                "id": ix["id"],
+                                "name": ix.get("name", f"IX-{ix['id']}"),
+                                "name_long": ix.get("name_long", ""),
+                            })
 
-        # Exchange/IXP: active BGP peer that shares an IX with Zenlayer
-        exchange_ixp_asns_set = (direct_peer_asns & ix_member_asns) - local_set
-        exchange_ixp_at_facility = exchange_ixp_asns_set & facility_asns
+        print(f"[Summary] {location}: {len(local_ixes)} local IXes where Zenlayer is present")
 
-        # Direct On-Net: active BGP peer at facility with no shared IX
-        direct_on_net_at_facility = all_direct_at_facility - exchange_ixp_asns_set
-
-        # Upstream Transit: co-located networks that are not direct peers
-        transit_at_facility = facility_asns - all_direct_at_facility - local_set
-
+        # Simplified classification without global IX checking
+        # Direct On-Net: BGP peers at the facility
         direct_neighbors = [
             {"asn": n["asn"], "name": n["name"]}
-            for n in all_nets if n["asn"] in direct_on_net_at_facility
+            for n in all_nets if n["asn"] in direct_at_facility
         ]
 
-        print(
-            f"[Summary] {location}: "
-            f"{len(zl_ix_ids)} Zenlayer IXes, "
-            f"{len(ix_member_asns)} IX member ASNs, "
-            f"direct={len(direct_on_net_at_facility)} "
-            f"ixp={len(exchange_ixp_at_facility)} "
-            f"transit={len(transit_at_facility)}"
-        )
+        # Transit: Everything else at the facility
+        transit_at_facility = facility_asns - direct_at_facility - local_set
 
         return {
             "total": len(all_nets),
-            "direct_on_net_count": len(direct_on_net_at_facility),
-            "exchange_ixp_count": len(exchange_ixp_at_facility),
+            "direct_on_net_count": len(direct_neighbors),
+            "exchange_ixp_count": len(local_ixes),  # Number of IXes, not networks
             "transit_count": len(transit_at_facility),
             "direct_peers": sorted(direct_neighbors, key=lambda x: x["name"]),
-            "direct_peer_asns": sorted(list(direct_on_net_at_facility)),
-            "exchange_ixp_asns": sorted(list(exchange_ixp_at_facility)),
+            "direct_peer_asns": sorted(list(direct_at_facility)),
+            "local_ixes": sorted(local_ixes, key=lambda x: x["name"]),
         }
     except Exception as e:
         print(f"[API] Summary error: {e}")
         raise HTTPException(status_code=500, detail=str(e))
 
-@app.get("/routing", response_class=HTMLResponse)
-async def routing_flow_page(request: Request):
-    """Serve the hierarchical routing flow visualization page."""
-    return templates.TemplateResponse("routing.html", {
-        "request": request,
-        "cities": zenlayer_state.get("unique_cities", []),
-        "facilities": zenlayer_state.get("facilities", [])
-    })
 
-@app.get("/api/routing-flow")
-async def get_routing_flow(
-    location: str,
+@app.get("/api/export")
+async def export_networks(
+    location: Optional[str] = None,
     location_type: str = "city",
+    fac_id: Optional[int] = None,
+    category: str = "all"
 ):
-    """
-    Build hierarchical routing flow data using AS-Path Frequency Analysis
-    with PeeringDB verification.
-
-    Tree structure:
-      Level 0 (Root) – Zenlayer Origins
-      Level 1        – Direct Peers (Verified Local | External 1-Hop)
-        Level 2      – Downstream: networks that route through this peer
-        Level 2      – Reachable Transit: unresolved networks assigned to
-                       this peer via extended path analysis
-      Level 1        – Unresolved: networks not assignable to any peer
-    """
+    """Export current network view as CSV."""
+    import io
+    import csv
+    
     try:
+        # Get networks using same logic as discover endpoint
+        networks = _get_discovery_data(fac_id, location, location_type, category)
+        
+        # Get summary for classification
         config = load_config()
         zenlayer_asns = config.get("ASNS", DEFAULT_CONFIG["ASNS"])
-        local_set = set(zenlayer_asns)
-
-        # Get facilities for this location
-        target_fac_ids = []
-        if location_type == "city":
-            target_fac_ids = [f["id"] for f in zenlayer_state["facilities"] if f.get("city") == location]
-        else:
-            mapping = config.get("METRO_MAP", {})
-            cities_in_metro = [city for city, m in mapping.items() if m == location]
-            target_fac_ids = [f["id"] for f in zenlayer_state["facilities"] if f.get("city") in cities_in_metro]
-
-        if not target_fac_ids:
-            return {"error": "No facilities found for location"}
-
-        # Get all networks at these facilities
-        fac_query = ",".join(map(str, target_fac_ids))
-        netfacs = fetch_peeringdb(f"netfac?fac_id__in={fac_query}")
-        # Handle both API format (net_id) and local DB format (net or network_id)
-        net_ids = list(set([
-            nf.get("net_id") or nf.get("net") or nf.get("network_id")
-            for nf in netfacs
-            if nf.get("net_id") or nf.get("net") or nf.get("network_id")
-        ]))
-
-        all_nets = []
-        batch_size = 50
-        for i in range(0, len(net_ids), batch_size):
-            chunk = net_ids[i:i + batch_size]
-            nets = fetch_peeringdb(f"net?id__in={','.join(map(str, chunk))}")
-            all_nets.extend(nets)
-
-        # Index every non-Zenlayer facility network by ASN
-        facility_nets = {}
-        for net in all_nets:
+        direct_peer_asns, _ = _analyze_zenlayer_paths(zenlayer_asns)
+        facility_asns = {n["asn"] for n in networks if n.get("asn")}
+        direct_at_facility = direct_peer_asns & facility_asns
+        
+        # Build CSV
+        output = io.StringIO()
+        writer = csv.writer(output)
+        
+        # Header
+        writer.writerow([
+            "ASN",
+            "Network Name",
+            "Type",
+            "Classification",
+            "Peering Policy",
+            "Traffic Range"
+        ])
+        
+        # Data rows
+        for net in networks:
             asn = net.get("asn")
-            if asn and asn not in local_set:
-                facility_nets[asn] = net
-
-        facility_asn_set = set(facility_nets.keys())
-
-        # ==================================================================
-        # IX Detection — use ALL Zenlayer IXes; locality is enforced by
-        # the facility_asn_set intersection in Phase 1
-        # ==================================================================
-        zenlayer_net_ids = [n["id"] for n in zenlayer_state.get("networks", [])]
-
-        # All IXes where Zenlayer has a port (batched query)
-        zl_ix_ids: set = set()
-        if zenlayer_net_ids:
-            net_id_query = ",".join(map(str, zenlayer_net_ids))
-            for rec in fetch_peeringdb(f"netixlan?net_id__in={net_id_query}"):
-                ix_id = rec.get("ix_id") or rec.get("ix")
-                if ix_id:
-                    zl_ix_ids.add(ix_id)
-
-        # Build IX names and comprehensive member set from ALL Zenlayer IXes
-        ix_names: Dict[int, str] = {}
-        ix_member_asns: set = set()
-        asn_to_shared_ixes: Dict[int, List[int]] = {}
-        if zl_ix_ids:
-            ix_query = ",".join(map(str, zl_ix_ids))
-            ix_data = fetch_peeringdb(f"ix?id__in={ix_query}")
-            for ix in ix_data:
-                ix_id = ix.get("id")
-                if ix_id:
-                    ix_names[ix_id] = ix.get("name", f"IX-{ix_id}")
-
-            # Single batched query for all IX members
-            for rec in fetch_peeringdb(f"netixlan?ix_id__in={ix_query}"):
-                asn = rec.get("asn")
-                ix_id = rec.get("ix_id") or rec.get("ix")
-                if asn and asn not in local_set:
-                    ix_member_asns.add(asn)
-                    if ix_id:
-                        asn_to_shared_ixes.setdefault(asn, []).append(ix_id)
-
-        # ==================================================================
-        # AS-Path Frequency Analysis  (2 API calls per local ASN, cached)
-        # ==================================================================
-        direct_peer_asns, peer_downstreams = _analyze_zenlayer_paths(
-            zenlayer_asns
-        )
-        facility_direct = direct_peer_asns & facility_asn_set
-
-        # ==================================================================
-        # Classification
-        #
-        #   Exchange/IXP    = 1-hop BGP peer AND shares an IX with Zenlayer
-        #   Direct On-Net   = 1-hop BGP peer at facility AND NOT on shared IX
-        #   Upstream Transit= NOT a 1-hop BGP peer
-        # ==================================================================
-        ixp_asns = (direct_peer_asns & ix_member_asns) - local_set
-        direct_on_net_asns = facility_direct - ixp_asns
-        external_transit_asns = (
-            direct_peer_asns - facility_asn_set - ixp_asns - local_set
-        )
-
-        print(
-            f"[RoutingFlow] {location}: "
-            f"{len(zl_ix_ids)} Zenlayer IXes, "
-            f"{len(ix_member_asns)} IX member ASNs, "
-            f"direct={len(direct_on_net_asns)} "
-            f"ixp={len(ixp_asns)} "
-            f"transit={len(external_transit_asns)}"
-        )
-
-        # ==================================================================
-        # PHASE 1 — Identity Reservations (no children yet)
-        #
-        # Classify every potential Level-1 node.  Reserved ASNs can NOT
-        # be claimed as Downstream/Transit children by other peers.
-        # ==================================================================
-        identity_map: Dict[int, str] = {}  # {asn: category}
-
-        # Exchange/IXP first — 1-hop peer on a shared IX (highest specificity)
-        for asn in ixp_asns:
-            identity_map[asn] = "Exchange/IXP"
-
-        # Direct On-Net — 1-hop peer at facility with no shared IX
-        for asn in direct_on_net_asns:
-            identity_map[asn] = "Direct Peer"
-
-        # Upstream Transit — external 1-hop peers not on a shared IX
-        for asn in external_transit_asns:
-            identity_map[asn] = "Upstream Transit"
-
-        reserved_level_1 = set(identity_map.keys())
-
-        # ==================================================================
-        # PHASE 2 — Build Exchange/IXP nodes first
-        #
-        # Give IXP peers first pick of downstream children so they are
-        # never swallowed by a transit provider.
-        # ==================================================================
-        level1_nodes: Dict[int, dict] = {}
-        assigned_children: set = set()
-
-        for asn in sorted(identity_map.keys()):
-            if identity_map[asn] != "Exchange/IXP":
-                continue
-
-            net = facility_nets.get(asn)
-            if not net:
-                peer_data = fetch_peeringdb(f"net?asn={asn}")
-                net = peer_data[0] if peer_data else None
-            if not net:
-                continue
-
-            downstream_at_fac = peer_downstreams.get(asn, set()) & facility_asn_set
-            children = []
-            for d_asn in sorted(downstream_at_fac):
-                if d_asn in reserved_level_1 or d_asn in assigned_children or d_asn in local_set:
-                    continue
-                d_net = facility_nets.get(d_asn)
-                if d_net:
-                    children.append({
-                        "asn": d_asn,
-                        "name": d_net.get("name", f"AS{d_asn}"),
-                        "info_type": d_net.get("info_type", ""),
-                        "is_direct": False,
-                        "category": "Downstream",
-                    })
-                    assigned_children.add(d_asn)
-
-            shared_ix_list = [
-                ix_names.get(ix, f"IX-{ix}")
-                for ix in asn_to_shared_ixes.get(asn, [])
-            ]
-            is_at_fac = asn in facility_asn_set
-
-            level1_nodes[asn] = {
-                "asn": asn,
-                "name": net.get("name", f"AS{asn}"),
-                "info_type": net.get("info_type", ""),
-                "is_direct": asn in direct_peer_asns,
-                "verified": True,
-                "verification": "Shared IX (Facility)" if is_at_fac else "Shared IX",
-                "shared_ix": shared_ix_list,
-                "category": "Exchange/IXP",
-                "children": children,
-            }
-
-        # ==================================================================
-        # PHASE 3 — Build Direct On-Net and Upstream Transit nodes
-        #
-        # Strict guard: skip any child_asn in reserved_level_1.
-        # ==================================================================
-        for asn in sorted(identity_map.keys()):
-            cat = identity_map[asn]
-            if cat == "Exchange/IXP":
-                continue  # already built
-
-            net = facility_nets.get(asn)
-            if not net:
-                peer_data = fetch_peeringdb(f"net?asn={asn}")
-                net = peer_data[0] if peer_data else None
-            if not net:
-                continue
-
-            downstream_at_fac = peer_downstreams.get(asn, set()) & facility_asn_set
-            children = []
-            for d_asn in sorted(downstream_at_fac):
-                if d_asn in reserved_level_1 or d_asn in assigned_children or d_asn in local_set:
-                    continue
-                d_net = facility_nets.get(d_asn)
-                if d_net:
-                    children.append({
-                        "asn": d_asn,
-                        "name": d_net.get("name", f"AS{d_asn}"),
-                        "info_type": d_net.get("info_type", ""),
-                        "is_direct": False,
-                        "category": "Downstream",
-                    })
-                    assigned_children.add(d_asn)
-
-            is_at_fac = asn in facility_asn_set
-            if cat == "Direct Peer":
-                verification = "PeeringDB Facility"
-            else:
-                verification = "External 1-Hop"
-
-            level1_nodes[asn] = {
-                "asn": asn,
-                "name": net.get("name", f"AS{asn}"),
-                "info_type": net.get("info_type", ""),
-                "is_direct": asn in direct_peer_asns,
-                "verified": is_at_fac,
-                "verification": verification,
-                "shared_ix": [ix_names.get(ix, f"IX-{ix}") for ix in asn_to_shared_ixes.get(asn, [])],
-                "category": cat,
-                "children": children,
-            }
-
-        # ==================================================================
-        # PHASE 4 — Remainder assignment & tree assembly
-        # ==================================================================
-        remaining_asns = facility_asn_set - reserved_level_1 - assigned_children - local_set
-
-        # Nest via peer_downstreams into non-IXP peers
-        transit_nested = 0
-        for t_asn in list(remaining_asns):
-            for peer_asn, ds_set in peer_downstreams.items():
-                if t_asn in ds_set and peer_asn in level1_nodes and level1_nodes[peer_asn]["category"] != "Exchange/IXP":
-                    t_net = facility_nets[t_asn]
-                    level1_nodes[peer_asn]["children"].append({
-                        "asn": t_asn,
-                        "name": t_net.get("name", f"AS{t_asn}"),
-                        "info_type": t_net.get("info_type", ""),
-                        "is_direct": False,
-                        "category": "Reachable Transit",
-                    })
-                    assigned_children.add(t_asn)
-                    remaining_asns.discard(t_asn)
-                    transit_nested += 1
-                    break
-
-        # Round-robin truly unresolved into routable (non-IXP) peers
-        routable_peers = [
-            p for p in level1_nodes.values()
-            if p["category"] != "Exchange/IXP"
-        ]
-        if remaining_asns and routable_peers:
-            for u_asn in sorted(remaining_asns):
-                u_net = facility_nets[u_asn]
-                target = min(routable_peers, key=lambda p: len(p["children"]))
-                target["children"].append({
-                    "asn": u_asn,
-                    "name": u_net.get("name", f"AS{u_asn}"),
-                    "info_type": u_net.get("info_type", ""),
-                    "is_direct": False,
-                    "category": "Reachable Transit",
-                })
-                transit_nested += 1
-
-        # Re-sort children within each peer
-        for node in level1_nodes.values():
-            node["children"].sort(key=lambda x: x["name"])
-
-        # Assemble tree
-        direct_list = sorted(level1_nodes.values(), key=lambda x: x["name"])
-        downstream_total = sum(
-            1 for p in direct_list for c in p["children"]
-            if c.get("category") == "Downstream"
-        )
-
-        direct_on_net = [p for p in direct_list if p["category"] == "Direct Peer"]
-        exchange_ixp_peers = [p for p in direct_list if p["category"] == "Exchange/IXP"]
-        upstream_transit_peers = [p for p in direct_list if p["category"] == "Upstream Transit"]
-
-        tree = {
-            "name": f"Zenlayer ({', '.join(f'AS{asn}' for asn in zenlayer_asns)})",
-            "asn": zenlayer_asns[0],
-            "location": location,
-            "direct_on_net_count": len(direct_on_net),
-            "exchange_ixp_count": len(exchange_ixp_peers),
-            "upstream_transit_count": len(upstream_transit_peers),
-            "downstream_count": downstream_total,
-            "transit_nested_count": transit_nested,
-            "children": direct_list,
-        }
-
-        return tree
-
-    except Exception as e:
-        print(f"[API] Routing flow error: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
-
-
-# ---------------------------------------------------------------------------
-# PDF Export
-# ---------------------------------------------------------------------------
-
-def _build_routing_pdf(tree: dict, location: str) -> bytes:
-    """Render a customer-ready PDF for a routing-flow tree."""
-    import io
-    from reportlab.lib.pagesizes import letter
-    from reportlab.lib.units import inch
-    from reportlab.lib import colors
-    from reportlab.platypus import (
-        SimpleDocTemplate, Table, TableStyle, Paragraph, Spacer
-    )
-    from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
-    from reportlab.lib.enums import TA_CENTER, TA_LEFT
-    from datetime import datetime, timezone
-
-    buf = io.BytesIO()
-    doc = SimpleDocTemplate(
-        buf, pagesize=letter,
-        topMargin=0.6 * inch, bottomMargin=0.5 * inch,
-        leftMargin=0.6 * inch, rightMargin=0.6 * inch,
-    )
-    styles = getSampleStyleSheet()
-    elements = []
-
-    # Colours
-    zl_navy = colors.HexColor("#00205B")
-    zl_blue = colors.HexColor("#00A9E0")
-    peer_blue = colors.HexColor("#2563eb")
-    verified_green = colors.HexColor("#16a34a")
-    light_blue = colors.HexColor("#eff6ff")
-    light_green = colors.HexColor("#dcfce7")
-    ds_blue = colors.HexColor("#dbeafe")
-    transit_bg = colors.HexColor("#f1f5f9")
-
-    # Custom styles
-    title_style = ParagraphStyle(
-        "ZLTitle", parent=styles["Title"],
-        textColor=zl_navy, fontSize=18, spaceAfter=2,
-    )
-    subtitle_style = ParagraphStyle(
-        "ZLSub", parent=styles["Normal"],
-        textColor=colors.HexColor("#64748b"), fontSize=10, spaceAfter=12,
-    )
-    section_style = ParagraphStyle(
-        "ZLSection", parent=styles["Heading2"],
-        textColor=zl_navy, fontSize=13, spaceBefore=16, spaceAfter=6,
-    )
-    cell_style = ParagraphStyle(
-        "Cell", parent=styles["Normal"], fontSize=9, leading=12,
-    )
-    cell_bold = ParagraphStyle(
-        "CellBold", parent=cell_style, fontName="Helvetica-Bold",
-    )
-    cell_mono = ParagraphStyle(
-        "CellMono", parent=cell_style, fontName="Courier", fontSize=9,
-    )
-    cell_small = ParagraphStyle(
-        "CellSmall", parent=cell_style, fontSize=8,
-        textColor=colors.HexColor("#64748b"),
-    )
-
-    # Header
-    now = datetime.now(timezone.utc).strftime("%d %b %Y %H:%M UTC")
-    elements.append(Paragraph("Zenlayer BGP Routing Flow", title_style))
-    elements.append(Paragraph(f"{location}  &mdash;  Generated {now}", subtitle_style))
-
-    # Summary — use new tree fields
-    direct_peers = tree.get("children", [])
-    downstream_total = tree.get("downstream_count", 0)
-    transit_nested = tree.get("transit_nested_count", 0)
-
-    summary_data = [
-        ["Verified Peers", str(tree.get("direct_peer_count", len(direct_peers)))],
-        ["Downstream Networks", str(downstream_total)],
-        ["Reachable Transit", str(transit_nested)],
-        [
-            "Total Facility Networks",
-            str(len(direct_peers) + downstream_total + transit_nested),
-        ],
-    ]
-    summary_table = Table(summary_data, colWidths=[2.5 * inch, 1.2 * inch])
-    summary_table.setStyle(TableStyle([
-        ("FONTNAME", (0, 0), (-1, -1), "Helvetica"),
-        ("FONTSIZE", (0, 0), (-1, -1), 10),
-        ("FONTNAME", (1, 0), (1, -1), "Helvetica-Bold"),
-        ("ALIGN", (1, 0), (1, -1), "RIGHT"),
-        ("BOTTOMPADDING", (0, 0), (-1, -1), 4),
-        ("TOPPADDING", (0, 0), (-1, -1), 4),
-        ("LINEBELOW", (0, -1), (-1, -1), 0.5, colors.HexColor("#cbd5e1")),
-    ]))
-    elements.append(summary_table)
-
-    # Direct Peers section
-    if direct_peers:
-        elements.append(Paragraph("Verified Peers", section_style))
-
-        for peer in sorted(direct_peers, key=lambda p: p.get("name", "")):
-            all_kids = peer.get("children", [])
-            peer_downstream = [c for c in all_kids if c.get("category") == "Downstream"]
-            peer_transit = [c for c in all_kids if c.get("category") != "Downstream"]
-
-            # Verification label
-            verified = peer.get("verified", False)
-            verification = peer.get("verification", "")
-            if verified:
-                status_text = f'<font color="#16a34a"><b>{verification}</b></font>'
-            else:
-                status_text = f'<font color="#94a3b8">{verification}</font>'
-
-            # Shared IX detail
-            shared_ix = peer.get("shared_ix", [])
-            ix_detail = ""
-            if shared_ix:
-                ix_detail = f" ({', '.join(shared_ix)})"
-
-            # Summary line
-            counts = []
-            if peer_downstream:
-                counts.append(f"{len(peer_downstream)} downstream")
-            if peer_transit:
-                counts.append(f"{len(peer_transit)} reachable transit")
-            count_text = ", ".join(counts) if counts else "no downstream"
-
-            rows = [[
-                Paragraph(f"<b>AS{peer['asn']}</b>", cell_mono),
-                Paragraph(f"<b>{peer.get('name', '')}</b>", cell_bold),
-                Paragraph(status_text + ix_detail, cell_style),
-                Paragraph(count_text, cell_small),
-            ]]
-            peer_bg = light_green if verified else light_blue
-            peer_border = verified_green if verified else colors.HexColor("#94a3b8")
-            t = Table(rows, colWidths=[0.9 * inch, 2.5 * inch, 1.6 * inch, 1.2 * inch])
-            t.setStyle(TableStyle([
-                ("BACKGROUND", (0, 0), (-1, 0), peer_bg),
-                ("BOX", (0, 0), (-1, -1), 0.5, peer_border),
-                ("TOPPADDING", (0, 0), (-1, -1), 5),
-                ("BOTTOMPADDING", (0, 0), (-1, -1), 5),
-                ("LEFTPADDING", (0, 0), (-1, -1), 6),
-            ]))
-            elements.append(Spacer(1, 4))
-            elements.append(t)
-
-            # Downstream table under this peer
-            if peer_downstream:
-                ds_rows = []
-                for ds in sorted(peer_downstream, key=lambda d: d.get("name", "")):
-                    ds_rows.append([
-                        Paragraph(f"AS{ds['asn']}", cell_mono),
-                        Paragraph(ds.get("name", ""), cell_style),
-                        Paragraph(ds.get("info_type", ""), cell_style),
-                    ])
-                ds_table = Table(
-                    ds_rows,
-                    colWidths=[0.9 * inch, 3.0 * inch, 1.3 * inch],
-                )
-                ds_table.setStyle(TableStyle([
-                    ("BACKGROUND", (0, 0), (-1, -1), ds_blue),
-                    ("BOX", (0, 0), (-1, -1), 0.25, colors.HexColor("#93c5fd")),
-                    ("LINEBELOW", (0, 0), (-1, -2), 0.25, colors.HexColor("#bfdbfe")),
-                    ("TOPPADDING", (0, 0), (-1, -1), 3),
-                    ("BOTTOMPADDING", (0, 0), (-1, -1), 3),
-                    ("LEFTPADDING", (0, 0), (0, -1), 20),
-                    ("LEFTPADDING", (1, 0), (-1, -1), 6),
-                ]))
-                elements.append(ds_table)
-
-            # Reachable transit table under this peer
-            if peer_transit:
-                tr_rows = []
-                for tr in sorted(peer_transit, key=lambda t_node: t_node.get("name", "")):
-                    tr_rows.append([
-                        Paragraph(f"AS{tr['asn']}", cell_mono),
-                        Paragraph(tr.get("name", ""), cell_style),
-                        Paragraph(tr.get("info_type", ""), cell_small),
-                    ])
-                tr_table = Table(
-                    tr_rows,
-                    colWidths=[0.9 * inch, 3.0 * inch, 1.3 * inch],
-                )
-                tr_table.setStyle(TableStyle([
-                    ("BACKGROUND", (0, 0), (-1, -1), transit_bg),
-                    ("BOX", (0, 0), (-1, -1), 0.25, colors.HexColor("#cbd5e1")),
-                    ("LINEBELOW", (0, 0), (-1, -2), 0.25, colors.HexColor("#e2e8f0")),
-                    ("TOPPADDING", (0, 0), (-1, -1), 3),
-                    ("BOTTOMPADDING", (0, 0), (-1, -1), 3),
-                    ("LEFTPADDING", (0, 0), (0, -1), 20),
-                    ("LEFTPADDING", (1, 0), (-1, -1), 6),
-                ]))
-                elements.append(tr_table)
-
-    # Footer note
-    elements.append(Spacer(1, 20))
-    elements.append(Paragraph(
-        "Data sourced from PeeringDB and RIPEstat. "
-        "Direct peer verification uses PeeringDB facility and IX co-location data. "
-        "Peer classification is based on AS-path frequency analysis "
-        "of Zenlayer prefix announcements.",
-        ParagraphStyle("Footer", parent=styles["Normal"],
-                        fontSize=8, textColor=colors.HexColor("#94a3b8")),
-    ))
-
-    doc.build(elements)
-    buf.seek(0)
-    return buf.getvalue()
-
-
-@app.get("/api/routing-flow/pdf")
-async def routing_flow_pdf(location: str, location_type: str = "city"):
-    """Generate and return a PDF export of the routing flow for a location."""
-    try:
-        tree_response = await get_routing_flow(
-            location=location, location_type=location_type
-        )
-        if isinstance(tree_response, dict) and "error" in tree_response:
-            raise HTTPException(status_code=404, detail=tree_response["error"])
-
-        pdf_bytes = _build_routing_pdf(tree_response, location)
-        safe_name = location.replace(" ", "_").replace("/", "-")
-
-        import io
+            classification = "Direct On-Net" if asn in direct_at_facility else "Upstream Transit"
+            
+            writer.writerow([
+                f"AS{asn}" if asn else "",
+                net.get("name", ""),
+                net.get("info_type", ""),
+                classification,
+                net.get("policy", "Not Specified"),
+                net.get("traffic_range", "Unknown")
+            ])
+        
+        # Generate filename
+        location_str = location or f"facility_{fac_id}"
+        safe_name = location_str.replace(" ", "_").replace("/", "-")
+        filename = f"Zenlayer_Networks_{safe_name}_{category}.csv"
+        
+        # Return CSV
+        output.seek(0)
         return StreamingResponse(
-            io.BytesIO(pdf_bytes),
-            media_type="application/pdf",
-            headers={
-                "Content-Disposition": f'attachment; filename="Zenlayer_Routing_{safe_name}.pdf"'
-            },
+            iter([output.getvalue()]),
+            media_type="text/csv",
+            headers={"Content-Disposition": f'attachment; filename="{filename}"'}
         )
-    except HTTPException:
-        raise
+        
     except Exception as e:
-        print(f"[API] PDF export error: {e}")
+        print(f"[API] Export error: {e}")
         raise HTTPException(status_code=500, detail=str(e))
