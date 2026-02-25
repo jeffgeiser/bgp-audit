@@ -352,8 +352,8 @@ def _initialize_peeringdb_sync():
             size_mb = os.path.getsize(PEERINGDB_DB_PATH) / (1024 * 1024)
             print(f"[PeeringDB] Current database size: {size_mb:.1f} MB")
 
-            # Auto-sync if database is older than 1 day or very small (just schema)
-            if age_days > 1 or size_mb < 1:
+            # Auto-sync if database is older than 1.5 days or very small (just schema)
+            if age_days > 1.5 or size_mb < 1:
                 print("[PeeringDB] Database needs sync, syncing...")
                 try:
                     pdb_client.update_all()
@@ -461,8 +461,10 @@ def fetch_peeringdb(endpoint: str, timeout: int = 10) -> List[Dict[str, Any]]:
 
             # Get all field values from the Django model
             for field in obj._meta.fields:
-                field_name = field.name
-                field_value = getattr(obj, field_name)
+                # Use attname to get the raw column value (e.g., 'fac_id' not 'fac')
+                # This handles ForeignKey fields correctly
+                field_name = field.attname
+                field_value = getattr(obj, field.attname)
 
                 # Convert datetime objects to ISO format strings
                 if hasattr(field_value, 'isoformat'):
