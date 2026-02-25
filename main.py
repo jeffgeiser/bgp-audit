@@ -352,8 +352,8 @@ def _initialize_peeringdb_sync():
             size_mb = os.path.getsize(PEERINGDB_DB_PATH) / (1024 * 1024)
             print(f"[PeeringDB] Current database size: {size_mb:.1f} MB")
 
-            # Auto-sync if database is older than 1 day or very small (just schema)
-            if age_days > 1 or size_mb < 1:
+            # Auto-sync if database is older than 1.5 days or very small (just schema)
+            if age_days > 1.5 or size_mb < 1:
                 print("[PeeringDB] Database needs sync, syncing...")
                 try:
                     pdb_client.update_all()
@@ -461,8 +461,10 @@ def fetch_peeringdb(endpoint: str, timeout: int = 10) -> List[Dict[str, Any]]:
 
             # Get all field values from the Django model
             for field in obj._meta.fields:
-                field_name = field.name
-                field_value = getattr(obj, field_name)
+                # Use attname to get the raw column value (e.g., 'fac_id' not 'fac')
+                # This handles ForeignKey fields correctly
+                field_name = field.attname
+                field_value = getattr(obj, field.attname)
 
                 # Convert datetime objects to ISO format strings
                 if hasattr(field_value, 'isoformat'):
@@ -473,6 +475,9 @@ def fetch_peeringdb(endpoint: str, timeout: int = 10) -> List[Dict[str, Any]]:
             output.append(obj_dict)
 
         print(f"[PeeringDB] Local query '{endpoint}': {len(output)} results")
+        # Debug: log field names of first record to help diagnose key errors
+        if output:
+            print(f"[PeeringDB] Fields in first '{model_name}' record: {list(output[0].keys())}")
         return output
 
     except Exception as e:
@@ -502,7 +507,11 @@ def _initialize_footprint_sync():
         return
 
     netfacs = fetch_peeringdb(f"netfac?net_id__in={','.join(map(str, net_ids))}")
-    fac_ids = list(set([nf["fac_id"] for nf in netfacs]))
+    # Try both field name variants (API uses 'fac_id', Django model may use 'facility_id')
+    fac_key = "fac_id" if netfacs and "fac_id" in netfacs[0] else "facility_id"
+    if netfacs:
+        print(f"[Footprint] netfac field names: {list(netfacs[0].keys())}")
+    fac_ids = list(set([nf[fac_key] for nf in netfacs if nf.get(fac_key)]))
 
     if fac_ids:
         facilities = fetch_peeringdb(f"fac?id__in={','.join(map(str, fac_ids))}")
