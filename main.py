@@ -587,7 +587,12 @@ def _get_discovery_data(fac_id: Optional[int], location_name: Optional[str], loc
     if fac_id:
         # Search specifically in one data center
         netfacs = fetch_peeringdb(f"netfac?fac_id={fac_id}")
-        net_ids = [nf["net_id"] for nf in netfacs]
+        # Handle both API format (net_id) and local DB format (net or network_id)
+        net_ids = [
+            nf.get("net_id") or nf.get("net") or nf.get("network_id")
+            for nf in netfacs
+            if nf.get("net_id") or nf.get("net") or nf.get("network_id")
+        ]
     elif location_name:
         # Find relevant facilities
         target_fac_ids = []
@@ -608,7 +613,12 @@ def _get_discovery_data(fac_id: Optional[int], location_name: Optional[str], loc
         if target_fac_ids:
             fac_query = ",".join(map(str, target_fac_ids))
             netfacs = fetch_peeringdb(f"netfac?fac_id__in={fac_query}")
-            net_ids = list(set([nf["net_id"] for nf in netfacs]))
+            # Handle both API format (net_id) and local DB format (net or network_id)
+            net_ids = list(set([
+                nf.get("net_id") or nf.get("net") or nf.get("network_id")
+                for nf in netfacs
+                if nf.get("net_id") or nf.get("net") or nf.get("network_id")
+            ]))
     
     if not net_ids:
         return []
