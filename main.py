@@ -457,15 +457,8 @@ async def discover_summary(
         # AS-Path analysis: find direct peers from Zenlayer's own paths
         direct_peer_asns, _ = _analyze_zenlayer_paths(zenlayer_asns)
         facility_asns = {n["asn"] for n in all_nets if n.get("asn")}
-        direct_at_facility = direct_peer_asns & facility_asns
-
-        direct_neighbors = [
-            {"asn": n["asn"], "name": n["name"]}
-            for n in all_nets if n["asn"] in direct_at_facility
-        ]
 
         # ----- IX detection: use ALL Zenlayer IXes -----
-        # Locality is enforced by intersecting with facility_asns below
         zenlayer_net_ids = [
             n["id"] for n in zenlayer_state.get("networks", [])
         ]
@@ -485,28 +478,51 @@ async def discover_summary(
                     ix_member_asns.add(rec["asn"])
 
         ix_member_asns -= local_set
-        ix_member_asns -= direct_at_facility
+
+        # ------------------------------------------------------------------
+        # Classification (new approach):
+        #
+        #   Exchange/IXP    = 1-hop BGP peer AND shares an IX with Zenlayer
+        #   Direct On-Net   = 1-hop BGP peer at facility AND NOT on shared IX
+        #   Upstream Transit= NOT a 1-hop BGP peer
+        #
+        # The IX test takes priority: if a network peers with Zenlayer AND
+        # is a member of the same IX fabric, the session goes over that
+        # exchange regardless of whether a cross-connect also exists.
+        # ------------------------------------------------------------------
+        all_direct_at_facility = direct_peer_asns & facility_asns
+
+        # Exchange/IXP: active BGP peer that shares an IX with Zenlayer
+        exchange_ixp_asns_set = (direct_peer_asns & ix_member_asns) - local_set
+        exchange_ixp_at_facility = exchange_ixp_asns_set & facility_asns
+
+        # Direct On-Net: active BGP peer at facility with no shared IX
+        direct_on_net_at_facility = all_direct_at_facility - exchange_ixp_asns_set
+
+        # Upstream Transit: co-located networks that are not direct peers
+        transit_at_facility = facility_asns - all_direct_at_facility - local_set
+
+        direct_neighbors = [
+            {"asn": n["asn"], "name": n["name"]}
+            for n in all_nets if n["asn"] in direct_on_net_at_facility
+        ]
 
         print(
             f"[Summary] {location}: "
             f"{len(zl_ix_ids)} Zenlayer IXes, "
             f"{len(ix_member_asns)} IX member ASNs, "
-            f"{len(ix_member_asns & facility_asns)} IX members at facility"
-        )
-
-        exchange_ixp_at_facility = facility_asns & ix_member_asns
-        transit_at_facility = (
-            facility_asns - direct_at_facility
-            - exchange_ixp_at_facility - local_set
+            f"direct={len(direct_on_net_at_facility)} "
+            f"ixp={len(exchange_ixp_at_facility)} "
+            f"transit={len(transit_at_facility)}"
         )
 
         return {
             "total": len(all_nets),
-            "direct_on_net_count": len(direct_neighbors),
+            "direct_on_net_count": len(direct_on_net_at_facility),
             "exchange_ixp_count": len(exchange_ixp_at_facility),
             "transit_count": len(transit_at_facility),
             "direct_peers": sorted(direct_neighbors, key=lambda x: x["name"]),
-            "direct_peer_asns": sorted(list(direct_at_facility)),
+            "direct_peer_asns": sorted(list(direct_on_net_at_facility)),
             "exchange_ixp_asns": sorted(list(exchange_ixp_at_facility)),
         }
     except Exception as e:
@@ -619,12 +635,26 @@ async def get_routing_flow(
         )
         facility_direct = direct_peer_asns & facility_asn_set
 
+        # ==================================================================
+        # Classification
+        #
+        #   Exchange/IXP    = 1-hop BGP peer AND shares an IX with Zenlayer
+        #   Direct On-Net   = 1-hop BGP peer at facility AND NOT on shared IX
+        #   Upstream Transit= NOT a 1-hop BGP peer
+        # ==================================================================
+        ixp_asns = (direct_peer_asns & ix_member_asns) - local_set
+        direct_on_net_asns = facility_direct - ixp_asns
+        external_transit_asns = (
+            direct_peer_asns - facility_asn_set - ixp_asns - local_set
+        )
+
         print(
             f"[RoutingFlow] {location}: "
-            f"{len(facility_direct)} direct peers at facility, "
             f"{len(zl_ix_ids)} Zenlayer IXes, "
             f"{len(ix_member_asns)} IX member ASNs, "
-            f"{len(ix_member_asns & facility_asn_set)} IX members at facility"
+            f"direct={len(direct_on_net_asns)} "
+            f"ixp={len(ixp_asns)} "
+            f"transit={len(external_transit_asns)}"
         )
 
         # ==================================================================
@@ -635,23 +665,17 @@ async def get_routing_flow(
         # ==================================================================
         identity_map: Dict[int, str] = {}  # {asn: category}
 
-        # Tier 1: Direct On-Net — BGP peers verified at the facility
-        for asn in facility_direct:
+        # Exchange/IXP first — 1-hop peer on a shared IX (highest specificity)
+        for asn in ixp_asns:
+            identity_map[asn] = "Exchange/IXP"
+
+        # Direct On-Net — 1-hop peer at facility with no shared IX
+        for asn in direct_on_net_asns:
             identity_map[asn] = "Direct Peer"
 
-        # Tier 2: Exchange/IXP — facility networks on shared IXes
-        for asn in (ix_member_asns & facility_asn_set) - local_set:
-            if asn not in identity_map:
-                identity_map[asn] = "Exchange/IXP"
-
-        # Tier 3: External 1-hop peers (not at facility)
-        external_direct = direct_peer_asns - facility_asn_set - local_set
-        for hop_asn in external_direct:
-            if hop_asn not in identity_map:
-                if hop_asn in ix_member_asns:
-                    identity_map[hop_asn] = "Exchange/IXP"
-                else:
-                    identity_map[hop_asn] = "Upstream Transit"
+        # Upstream Transit — external 1-hop peers not on a shared IX
+        for asn in external_transit_asns:
+            identity_map[asn] = "Upstream Transit"
 
         reserved_level_1 = set(identity_map.keys())
 
