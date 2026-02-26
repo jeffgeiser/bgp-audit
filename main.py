@@ -360,7 +360,13 @@ def _initialize_peeringdb_sync():
                     print("[PeeringDB] Sync complete")
                 except Exception as sync_error:
                     print(f"[PeeringDB] Sync failed (likely rate limited): {sync_error}")
-                    print("[PeeringDB] Will continue with existing database and retry later")
+                    # If the DB is still schema-only after a failed sync, fall back to REST API
+                    post_sync_size = os.path.getsize(PEERINGDB_DB_PATH) / (1024 * 1024) if os.path.exists(PEERINGDB_DB_PATH) else 0
+                    if post_sync_size < 1:
+                        print("[PeeringDB] Database still empty after failed sync, falling back to REST API")
+                        pdb_client = None
+                    else:
+                        print("[PeeringDB] Will continue with existing database and retry later")
         else:
             # Initial sync on first run
             print("[PeeringDB] Performing initial sync (this may take a few minutes)...")
@@ -570,11 +576,13 @@ async def initialize_footprint():
 @app.get("", response_class=HTMLResponse)
 async def dashboard_home(request: Request):
     """Serve the main dashboard UI."""
+    config = zenlayer_state.get("config", {})
     return templates.TemplateResponse("index.html", {
         "request": request,
         "metros": zenlayer_state.get("unique_metros", []),
         "cities": zenlayer_state.get("unique_cities", []),
-        "facilities": zenlayer_state.get("facilities", [])
+        "facilities": zenlayer_state.get("facilities", []),
+        "metro_mapping": config.get("METRO_MAP", {})
     })
 
 @app.get("/settings", response_class=HTMLResponse)
