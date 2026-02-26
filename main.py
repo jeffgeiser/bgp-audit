@@ -623,6 +623,36 @@ async def resync_footprint():
         "facilities": len(zenlayer_state.get("facilities", [])),
     }
 
+@app.get("/api/debug/peeringdb")
+async def debug_peeringdb():
+    """Test PeeringDB connectivity and local DB state from the server."""
+    result = {
+        "pdb_client_initialized": pdb_client is not None,
+        "db_path": PEERINGDB_DB_PATH,
+        "db_exists": os.path.exists(PEERINGDB_DB_PATH),
+        "db_size_mb": round(os.path.getsize(PEERINGDB_DB_PATH) / (1024 * 1024), 2) if os.path.exists(PEERINGDB_DB_PATH) else 0,
+    }
+    # Test REST API reachability
+    try:
+        resp = requests.get(f"{PEERINGDB_BASE}/net?asn__in=21859,4229", timeout=10,
+                            headers={"User-Agent": "bgp-audit/1.0"})
+        resp.raise_for_status()
+        data = resp.json().get("data", [])
+        result["rest_api_reachable"] = True
+        result["rest_api_networks"] = len(data)
+        result["rest_api_net_ids"] = [n["id"] for n in data]
+    except Exception as e:
+        result["rest_api_reachable"] = False
+        result["rest_api_error"] = str(e)
+    # Test local DB query
+    if pdb_client is not None:
+        try:
+            nets = pdb_client.all(resource.Network).filter(asn__in=[21859, 4229])
+            result["local_db_networks"] = len(list(nets))
+        except Exception as e:
+            result["local_db_error"] = str(e)
+    return result
+
 @app.post("/api/cache/clear")
 async def clear_cache():
     """Clear all caches (file + in-memory) for debugging."""
