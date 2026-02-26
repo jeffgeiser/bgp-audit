@@ -34,4 +34,4 @@ jobs:
       - name: Trigger Instant Watchtower Update
         run: |
           curl -H "Authorization: Bearer zenlayer_deploy_2026" \
-               http://dashboards.us.zenlayer.com:8080/v1/update
+               http://localhost:8080/v1/update
