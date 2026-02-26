@@ -205,6 +205,16 @@
 
                 init() {
                     console.log('[Routing] Alpine component initialized');
+                    // Use $watch to reactively trigger rendering when treeData changes
+                    this.$watch('treeData', (value) => {
+                        console.log('[Routing] $watch treeData changed:', !!value);
+                        if (value && !this.loading) {
+                            this.$nextTick(() => {
+                                console.log('[Routing] $nextTick after treeData watch, calling renderTree');
+                                this.renderTree();
+                            });
+                        }
+                    });
                 },
 
                 async loadRoutingFlow() {
@@ -219,46 +229,48 @@
                         const response = await fetch(url);
                         if (!response.ok) throw new Error('Failed to load routing data');
 
-                        this.treeData = await response.json();
-                        this.peerCount = this.treeData.children?.length || 0;
-                        this.downstreamCount = this.treeData.children?.reduce((acc, peer) => acc + (peer.children?.length || 0), 0) || 0;
+                        const data = await response.json();
+                        this.peerCount = data.children?.length || 0;
+                        this.downstreamCount = data.children?.reduce((acc, peer) => acc + (peer.children?.length || 0), 0) || 0;
+
+                        // Set loading false FIRST so the container becomes visible
+                        this.loading = false;
+                        // Then set treeData — $watch will trigger renderTree
+                        this.treeData = data;
 
                     } catch (err) {
                         console.error('Error loading routing flow:', err);
-                    } finally {
                         this.loading = false;
-                        // Wait for DOM to update after loading=false, then render
-                        await this.$nextTick();
-                        setTimeout(() => this.renderTree(), 50);
                     }
                 },
 
-                renderTree() {
+                renderTree(retryCount) {
+                    retryCount = retryCount || 0;
                     try {
-                        console.log('[Routing] renderTree() called');
+                        console.log('[Routing] renderTree() called, retry:', retryCount);
 
                         const container = document.getElementById('tree-container');
-                        console.log('[Routing] Container:', container);
 
-                        if (!container) {
-                            console.error('[Routing] Container not found!');
+                        if (!container || !this.treeData) {
+                            console.error('[Routing] Missing container or data');
                             return;
                         }
 
-                        if (!this.treeData) {
-                            console.error('[Routing] No tree data!');
+                        // If container isn't visible yet (zero width), retry after a short delay
+                        if (container.clientWidth === 0 && retryCount < 5) {
+                            console.log('[Routing] Container not visible yet, retrying...');
+                            setTimeout(() => this.renderTree(retryCount + 1), 150);
                             return;
                         }
 
                         // Clear previous
                         d3.select('#tree-container').selectAll('*').remove();
 
-                        const width = container.clientWidth || container.offsetWidth || 1200;
-                        // Calculate height based on number of peers (min 700, scale with peers)
+                        const width = container.clientWidth || 1200;
                         const peerCount = this.treeData.children?.length || 0;
                         const height = Math.max(700, peerCount * 25);
 
-                        console.log('[Routing] Dimensions:', { width, height, peers: peerCount, containerWidth: container.clientWidth, offsetWidth: container.offsetWidth });
+                        console.log('[Routing] Dimensions:', { width, height, peers: peerCount });
 
                     const margin = { top: 40, right: 250, bottom: 40, left: 150 };
 
@@ -284,14 +296,6 @@
 
                     this.svg.call(this.zoom);
                     console.log('[Routing] SVG created, gRef:', this.gRef);
-
-                    // Add a test text to verify SVG is visible
-                    this.svg.append('text')
-                        .attr('x', 20)
-                        .attr('y', 30)
-                        .style('font-size', '14px')
-                        .style('fill', 'red')
-                        .text('SVG Rendering Test - If you see this, D3 is working!');
 
                     // Create tree layout - swap dimensions for horizontal tree
                     const innerWidth = width - margin.left - margin.right;
