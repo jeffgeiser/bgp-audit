@@ -8,6 +8,10 @@ on:
 jobs:
   build-and-push:
     runs-on: self-hosted
+    # Added permissions block to ensure registry access
+    permissions:
+      contents: read
+      packages: write
 
     steps:
       - name: Checkout code
@@ -26,3 +30,8 @@ jobs:
           context: .
           push: true
           tags: ghcr.io/jeffgeiser/bgp-audit:latest
+
+      - name: Trigger Instant Watchtower Update
+        run: |
+          curl -H "Authorization: Bearer zenlayer_deploy_2026" \
+               http://dashboards.us.zenlayer.com:8080/v1/update
