@@ -577,8 +577,25 @@ async def update_settings(new_config: Dict[str, Any]):
     save_config(new_config)
     clear_file_cache()
     _get_discovery_data.cache_clear()
-    initialize_footprint()
+    loop = asyncio.get_event_loop()
+    await loop.run_in_executor(None, _initialize_peeringdb_sync)
+    await loop.run_in_executor(None, _initialize_footprint_sync)
     return {"status": "success", "message": "Settings updated."}
+
+@app.post("/api/resync")
+async def resync_footprint():
+    """Trigger a full PeeringDB sync and footprint re-initialization."""
+    global pdb_client
+    pdb_client = None  # Force re-init of client
+    loop = asyncio.get_event_loop()
+    await loop.run_in_executor(None, _initialize_peeringdb_sync)
+    await loop.run_in_executor(None, _initialize_footprint_sync)
+    return {
+        "status": "success",
+        "cities": zenlayer_state.get("unique_cities", []),
+        "metros": zenlayer_state.get("unique_metros", []),
+        "facilities": len(zenlayer_state.get("facilities", [])),
+    }
 
 @app.post("/api/cache/clear")
 async def clear_cache():
