@@ -1,5 +1,8 @@
 
 import os
+# Allow synchronous Django ORM calls from threads spawned in an async context.
+# We intentionally run all DB queries in thread executors, not coroutines.
+os.environ.setdefault("DJANGO_ALLOW_ASYNC_UNSAFE", "true")
 import json
 import time
 import hashlib
