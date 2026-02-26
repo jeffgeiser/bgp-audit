@@ -397,10 +397,28 @@ def fetch_peeringdb(endpoint: str, timeout: int = 10) -> List[Dict[str, Any]]:
     global pdb_client
 
     try:
-        # If client not initialized, return empty list
+        # If client not initialized, fall back to REST API
         if pdb_client is None:
-            print(f"[PeeringDB] Client not initialized, skipping query: {endpoint}")
-            return []
+            print(f"[PeeringDB] Client not initialized, falling back to REST API: {endpoint}")
+            cache_key = _cache_key("pdb_rest", endpoint)
+            cached = _read_cache(cache_key)
+            if cached is not None:
+                print(f"[PeeringDB] REST cache hit for '{endpoint}': {len(cached)} results")
+                return cached
+            url = f"{PEERINGDB_BASE}/{endpoint}"
+            headers = {"User-Agent": "bgp-audit/1.0"}
+            if PEERINGDB_API_KEY:
+                headers["Authorization"] = f"Api-Key {PEERINGDB_API_KEY}"
+            try:
+                resp = requests.get(url, headers=headers, timeout=30)
+                resp.raise_for_status()
+                data = resp.json().get("data", [])
+                print(f"[PeeringDB] REST API '{endpoint}': {len(data)} results")
+                _write_cache(cache_key, data)
+                return data
+            except Exception as rest_err:
+                print(f"[PeeringDB] REST API error for '{endpoint}': {rest_err}")
+                return []
 
         # Parse endpoint
         parts = endpoint.strip("/").split("?")
