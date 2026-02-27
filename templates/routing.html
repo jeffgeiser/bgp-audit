@@ -205,6 +205,18 @@
 
                 init() {
                     console.log('[Routing] Alpine component initialized');
+
+                    // Check if cities were loaded via Jinja2
+                    const citySelect = document.querySelector('select[x-model="selectedCity"]');
+                    const optionCount = citySelect ? citySelect.options.length - 1 : 0; // -1 for "Select Market..."
+                    console.log('[Routing] Cities in dropdown:', optionCount);
+
+                    // If no cities loaded from server, fetch from API
+                    if (optionCount === 0) {
+                        console.log('[Routing] No cities from server, fetching from API...');
+                        this.loadCitiesFromAPI(citySelect);
+                    }
+
                     // Use $watch to reactively trigger rendering when treeData changes
                     this.$watch('treeData', (value) => {
                         console.log('[Routing] $watch treeData changed:', !!value);
@@ -215,6 +227,25 @@
                             });
                         }
                     });
+                },
+
+                async loadCitiesFromAPI(selectEl) {
+                    try {
+                        const response = await fetch('/audit/api/settings');
+                        if (response.ok) {
+                            const data = await response.json();
+                            const cities = data.discovered_cities || [];
+                            console.log('[Routing] Fetched cities from API:', cities.length);
+                            cities.forEach(city => {
+                                const opt = document.createElement('option');
+                                opt.value = city;
+                                opt.textContent = city;
+                                selectEl.appendChild(opt);
+                            });
+                        }
+                    } catch (e) {
+                        console.error('[Routing] Failed to load cities from API:', e);
+                    }
                 },
 
                 async loadRoutingFlow() {
