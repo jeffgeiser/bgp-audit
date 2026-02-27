@@ -495,9 +495,16 @@ def fetch_peeringdb(endpoint: str, timeout: int = 10) -> List[Dict[str, Any]]:
                 field_name = field.attname
                 field_value = getattr(obj, field.attname)
 
-                # Convert datetime objects to ISO format strings
+                # Convert special types to JSON-serializable values
                 if hasattr(field_value, 'isoformat'):
+                    # datetime objects
                     obj_dict[field_name] = field_value.isoformat()
+                elif hasattr(field_value, 'code'):
+                    # Country objects (django-countries) - use country code
+                    obj_dict[field_name] = str(field_value)
+                elif not isinstance(field_value, (str, int, float, bool, type(None), list, dict)):
+                    # Any other non-serializable type - convert to string
+                    obj_dict[field_name] = str(field_value)
                 else:
                     obj_dict[field_name] = field_value
 
