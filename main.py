@@ -813,20 +813,46 @@ async def discover_summary(
             # Get IXes at these facilities
             fac_query = ",".join(map(str, target_fac_ids))
             ixfacs = fetch_peeringdb(f"ixfac?fac_id__in={fac_query}")
-            local_ix_ids = list(set([ixf["ix_id"] for ixf in ixfacs if ixf.get("ix_id")]))
+
+            # Debug: log ixfac field names
+            if ixfacs:
+                print(f"[Summary] ixfac fields: {list(ixfacs[0].keys())}")
+
+            # Handle both API format (ix_id) and local DB format (ix or ixlan_id)
+            local_ix_ids = list(set([
+                ixf.get("ix_id") or ixf.get("ix") or ixf.get("ixlan_id")
+                for ixf in ixfacs
+                if ixf.get("ix_id") or ixf.get("ix") or ixf.get("ixlan_id")
+            ]))
+
+            print(f"[Summary] Found {len(local_ix_ids)} IXes at facilities: {local_ix_ids[:10]}...")
 
             if local_ix_ids:
                 # Get IX details
                 ix_query = ",".join(map(str, local_ix_ids))
                 local_ixes_data = fetch_peeringdb(f"ix?id__in={ix_query}")
+                print(f"[Summary] Fetched {len(local_ixes_data)} IX details")
 
                 # Check which local IXes Zenlayer is connected to
                 zenlayer_net_ids = [n["id"] for n in zenlayer_state.get("networks", [])]
                 if zenlayer_net_ids:
                     net_id_query = ",".join(map(str, zenlayer_net_ids))
                     zl_ixlan = fetch_peeringdb(f"netixlan?net_id__in={net_id_query}")
-                    zenlayer_all_ix_ids = set([rec["ix_id"] for rec in zl_ixlan if rec.get("ix_id")])
+
+                    # Debug: log netixlan field names
+                    if zl_ixlan:
+                        print(f"[Summary] netixlan fields: {list(zl_ixlan[0].keys())}")
+
+                    # Handle both API format (ix_id) and local DB format (ixlan_id)
+                    zenlayer_all_ix_ids = set([
+                        rec.get("ix_id") or rec.get("ixlan_id")
+                        for rec in zl_ixlan
+                        if rec.get("ix_id") or rec.get("ixlan_id")
+                    ])
+                    print(f"[Summary] Zenlayer connected to {len(zenlayer_all_ix_ids)} IXes globally")
+
                     zenlayer_local_ix_ids = set(local_ix_ids) & zenlayer_all_ix_ids
+                    print(f"[Summary] Zenlayer present at {len(zenlayer_local_ix_ids)} local IXes")
 
                     # Build list of IXes at this facility that Zenlayer uses
                     for ix in local_ixes_data:
