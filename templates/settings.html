@@ -16,7 +16,8 @@
         .donut-logo {
             background: linear-gradient(to right, #33d4ff, #0076ff) border-box;
             -webkit-mask: linear-gradient(#fff 0 0) padding-box, linear-gradient(#fff 0 0);
-            -webkit-mask-composite: exclude;
+            -webkit-mask-composite: xor;
+            mask-composite: exclude;
         }
     </style>
 </head>
@@ -40,7 +41,7 @@
 
     <!-- Main Section -->
     <main class="flex-1 p-10 max-w-5xl mx-auto w-full">
-        <div class="bg-white rounded-3xl border border-slate-200 shadow-xl overflow-hidden flex flex-col min-h-[600px]">
+        <div class="bg-white rounded-3xl border border-slate-200 shadow-xl overflow-hidden flex flex-col">
             <div class="px-8 py-6 bg-slate-50/50 border-b border-slate-100 flex justify-between items-center">
                 <div>
                     <h2 class="text-lg font-black text-[#00205B]">Configuration Editor</h2>
@@ -55,7 +56,7 @@
                 </div>
             </div>
 
-            <div class="flex-1 p-8 flex flex-col relative">
+            <div class="p-8 flex flex-col">
                 <!-- Status Messages -->
                 <div x-show="error" x-cloak x-transition class="mb-6 p-4 bg-red-50 border border-red-100 text-red-700 rounded-xl text-sm font-medium flex justify-between items-center">
                     <span x-text="error"></span>
@@ -65,17 +66,18 @@
                     Settings successfully updated and audit cache refreshed!
                 </div>
 
-                <div class="flex-1 relative border border-slate-200 rounded-2xl overflow-hidden shadow-inner">
-                    <div class="absolute top-2 right-4 text-[10px] font-bold text-slate-300 uppercase tracking-widest pointer-events-none">JSON RAW VIEW</div>
-                    <textarea 
-                        x-model="rawJson" 
+                <div class="relative border border-slate-200 rounded-2xl overflow-hidden shadow-inner">
+                    <div class="absolute top-3 right-4 text-[10px] font-bold text-slate-300 uppercase tracking-widest pointer-events-none z-10">JSON RAW VIEW</div>
+                    <textarea
+                        x-model="rawJson"
                         spellcheck="false"
                         @input="onInput()"
-                        class="w-full h-full p-8 font-mono text-sm text-[#00205B] outline-none resize-none bg-slate-50 focus:bg-white transition-colors"
+                        class="w-full p-6 pt-10 font-mono text-sm text-[#00205B] outline-none resize-none bg-slate-50 focus:bg-white transition-colors custom-scrollbar"
+                        style="min-height: 450px;"
                         placeholder="{ ... }"
                     ></textarea>
                 </div>
-                
+
                 <div class="mt-4 flex items-center justify-between text-[10px] font-bold uppercase tracking-widest text-slate-400">
                     <div class="flex items-center space-x-2">
                         <div class="w-2 h-2 rounded-full" :class="isValid ? 'bg-emerald-400' : 'bg-red-400'"></div>
@@ -141,7 +143,7 @@
 
                 async saveSettings() {
                     if (!this.validateJson()) return;
-                    
+
                     this.saving = true;
                     this.error = null;
                     this.success = false;
@@ -154,7 +156,7 @@
                         });
 
                         if (!response.ok) throw new Error('Failed to update settings on server.');
-                        
+
                         this.success = true;
                         setTimeout(() => this.success = false, 5000);
                     } catch (err) {
