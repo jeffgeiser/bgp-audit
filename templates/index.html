@@ -180,27 +180,27 @@
         <header class="flex justify-between items-center">
             <!-- View Mode Filter Buttons (Left) -->
             <div class="flex items-center gap-3">
-                <div class="flex items-center p-1.5 rounded-2xl border shadow-sm"
+                <div class="flex items-center p-1 rounded-xl border shadow-sm"
                      :class="darkMode ? 'bg-slate-800 border-slate-700' : 'bg-white border-slate-200'">
                     <button
                         @click="setMode('upstream')"
-                        class="btn-toggle px-5 py-2.5 rounded-xl text-[10px] font-black uppercase tracking-wider"
+                        class="btn-toggle px-3 py-1.5 rounded-lg text-[10px] font-black uppercase tracking-wider"
                         :class="viewMode === 'upstream'
-                            ? 'bg-[#00205B] text-white shadow-xl scale-[1.05]'
+                            ? 'bg-[#00205B] text-white shadow-md'
                             : (darkMode ? 'text-slate-400 hover:text-slate-200' : 'text-slate-500 hover:text-slate-800')"
                     >Upstream</button>
                     <button
                         @click="setMode('peers')"
-                        class="btn-toggle px-5 py-2.5 rounded-xl text-[10px] font-black uppercase tracking-wider"
+                        class="btn-toggle px-3 py-1.5 rounded-lg text-[10px] font-black uppercase tracking-wider"
                         :class="viewMode === 'peers'
-                            ? 'bg-[#00205B] text-white shadow-xl scale-[1.05]'
+                            ? 'bg-[#00205B] text-white shadow-md'
                             : (darkMode ? 'text-slate-400 hover:text-slate-200' : 'text-slate-500 hover:text-slate-800')"
                     >Content & Peers</button>
                     <button
                         @click="setMode('all')"
-                        class="btn-toggle px-5 py-2.5 rounded-xl text-[10px] font-black uppercase tracking-wider"
+                        class="btn-toggle px-3 py-1.5 rounded-lg text-[10px] font-black uppercase tracking-wider"
                         :class="viewMode === 'all'
-                            ? 'bg-[#00205B] text-white shadow-xl scale-[1.05]'
+                            ? 'bg-[#00205B] text-white shadow-md'
                             : (darkMode ? 'text-slate-400 hover:text-slate-200' : 'text-slate-500 hover:text-slate-800')"
                     >All Networks</button>
                 </div>
@@ -326,7 +326,7 @@
                     <span class="w-2.5 h-2.5 rounded-full bg-[#00205B] flex-shrink-0"></span>
                     <div class="text-left">
                         <p class="text-[10px] font-black uppercase tracking-wider" :class="darkMode ? 'text-slate-500' : 'text-slate-400'">Total Networks</p>
-                        <p class="text-lg font-black leading-tight" :class="(darkMode ? 'text-white' : 'text-[#00205B]') + (isFiltered ? ' italic' : '')" x-text="dynamicTotal"></p>
+                        <p class="text-lg font-black leading-tight" :class="darkMode ? 'text-white' : 'text-[#00205B]'" x-text="dynamicTotal"></p>
                     </div>
                 </button>
 
@@ -338,7 +338,7 @@
                     <span class="w-2.5 h-2.5 rounded-full bg-emerald-500 flex-shrink-0"></span>
                     <div class="text-left">
                         <p class="text-[10px] font-black uppercase tracking-wider" :class="darkMode ? 'text-slate-500' : 'text-slate-400'">Direct On-Net</p>
-                        <p class="text-lg font-black leading-tight" :class="(darkMode ? 'text-emerald-400' : 'text-emerald-700') + (isFiltered ? ' italic' : '')" x-text="dynamicDirectCount"></p>
+                        <p class="text-lg font-black leading-tight" :class="darkMode ? 'text-emerald-400' : 'text-emerald-700'" x-text="dynamicDirectCount"></p>
                     </div>
                 </button>
 
@@ -350,7 +350,7 @@
                     <span class="w-2.5 h-2.5 rounded-full bg-amber-500 flex-shrink-0"></span>
                     <div class="text-left">
                         <p class="text-[10px] font-black uppercase tracking-wider" :class="darkMode ? 'text-slate-500' : 'text-slate-400'">Exchange / IXP</p>
-                        <p class="text-lg font-black leading-tight" :class="(darkMode ? 'text-amber-400' : 'text-amber-700') + (isFiltered ? ' italic' : '')" x-text="dynamicIxpCount"></p>
+                        <p class="text-lg font-black leading-tight" :class="darkMode ? 'text-amber-400' : 'text-amber-700'" x-text="dynamicIxpCount"></p>
                     </div>
                 </button>
 
@@ -362,7 +362,7 @@
                     <span class="w-2.5 h-2.5 rounded-full bg-violet-500 flex-shrink-0"></span>
                     <div class="text-left">
                         <p class="text-[10px] font-black uppercase tracking-wider" :class="darkMode ? 'text-slate-500' : 'text-slate-400'">Upstream Transit</p>
-                        <p class="text-lg font-black leading-tight" :class="(darkMode ? 'text-violet-400' : 'text-violet-600') + (isFiltered ? ' italic' : '')" x-text="dynamicTransitCount"></p>
+                        <p class="text-lg font-black leading-tight" :class="darkMode ? 'text-violet-400' : 'text-violet-600'" x-text="dynamicTransitCount"></p>
                     </div>
                 </button>
             </div>
@@ -614,7 +614,7 @@
                     return 'bg-violet-400'; // Changed from red to violet
                 },
 
-                get dynamicTotal() { return this.networks.length; },
+                get dynamicTotal() { return this.networks.length + (this.summary?.exchange_ixp_count || 0); },
                 get dynamicDirectCount() { return this.networks.filter(n => this.getHealth(n) === 'green').length; },
                 get dynamicIxpCount() { return this.summary?.exchange_ixp_count || 0; },
                 get dynamicTransitCount() { return this.networks.filter(n => this.getHealth(n) === 'transit').length; },
