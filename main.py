@@ -14,7 +14,9 @@ app = FastAPI(root_path="/audit")
 # Setup templates directory
 templates = Jinja2Templates(directory="templates")
 
-CONFIG_FILE = "config.json"
+# Use DATA_DIR env var for persistent storage (defaults to current dir for local dev)
+DATA_DIR = os.environ.get("DATA_DIR", ".")
+CONFIG_FILE = os.path.join(DATA_DIR, "config.json")
 PEERINGDB_BASE = "https://www.peeringdb.com/api"
 
 DEFAULT_CONFIG = {
