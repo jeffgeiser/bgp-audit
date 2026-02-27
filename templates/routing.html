@@ -1,0 +1,543 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Zenlayer | Routing Flow</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script defer src="https://cdn.jsdelivr.net/npm/alpinejs@3.x.x/dist/cdn.min.js"></script>
+    <script src="https://d3js.org/d3.v7.min.js"></script>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap" rel="stylesheet">
+    <style>
+        [x-cloak] { display: none !important; }
+        body { font-family: 'Inter', sans-serif; }
+
+        .node circle {
+            cursor: pointer;
+            stroke-width: 2px;
+        }
+
+        .node text {
+            font-size: 11px;
+            font-family: 'Inter', sans-serif;
+        }
+
+        .link {
+            fill: none;
+            stroke: #cbd5e1;
+            stroke-width: 1.5px;
+        }
+
+        .link-highlight {
+            stroke: #00A9E0;
+            stroke-width: 2.5px;
+        }
+
+        .tooltip {
+            position: absolute;
+            padding: 10px 14px;
+            background: rgba(0, 32, 91, 0.95);
+            color: white;
+            border-radius: 8px;
+            font-size: 12px;
+            pointer-events: none;
+            z-index: 1000;
+            box-shadow: 0 4px 20px rgba(0,0,0,0.3);
+        }
+
+        .node-root circle { fill: #00205B; stroke: #00A9E0; }
+        .node-peer circle { fill: #00A9E0; stroke: #00205B; }
+        .node-downstream circle { fill: #94a3b8; stroke: #64748b; }
+
+        .node-collapsed circle { fill-opacity: 0.6; }
+    </style>
+</head>
+<body class="bg-slate-50 min-h-screen" x-data="routingFlow()">
+    <!-- Header -->
+    <header class="bg-[#00205B] text-white shadow-xl">
+        <div class="max-w-7xl mx-auto px-6 py-4 flex items-center justify-between">
+            <div class="flex items-center space-x-4">
+                <a href="/audit/" class="flex items-center space-x-3 hover:opacity-80 transition-opacity">
+                    <div class="w-10 h-10 bg-[#00A9E0] rounded-lg flex items-center justify-center shadow-lg">
+                        <svg class="w-6 h-6 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13 10V3L4 14h7v7l9-11h-7z" />
+                        </svg>
+                    </div>
+                    <h1 class="text-xl font-bold tracking-tight uppercase">BGP Audit</h1>
+                </a>
+                <span class="text-white/30">|</span>
+                <span class="text-sm font-medium text-white/70">Routing Flow Visualization</span>
+            </div>
+            <nav class="flex items-center space-x-4">
+                <a href="/audit/" class="text-xs font-bold uppercase tracking-wider text-white/60 hover:text-white transition-colors">Dashboard</a>
+                <a href="/audit/settings" class="text-xs font-bold uppercase tracking-wider text-white/60 hover:text-white transition-colors">Settings</a>
+            </nav>
+        </div>
+    </header>
+
+    <!-- Controls -->
+    <div class="bg-white border-b border-slate-200 shadow-sm">
+        <div class="max-w-7xl mx-auto px-6 py-4">
+            <div class="flex flex-wrap items-center gap-4">
+                <div class="flex items-center gap-2">
+                    <label class="text-xs font-bold text-slate-500 uppercase tracking-wider">Market</label>
+                    <select
+                        x-model="selectedCity"
+                        @change="loadRoutingFlow()"
+                        class="bg-slate-50 border border-slate-200 rounded-lg px-4 py-2 text-sm font-medium focus:ring-2 focus:ring-[#00A9E0] focus:border-transparent outline-none"
+                    >
+                        <option value="">Select Market...</option>
+                        {% for city in cities %}
+                        <option value="{{ city }}">{{ city }}</option>
+                        {% endfor %}
+                    </select>
+                </div>
+
+                <div class="flex items-center gap-2">
+                    <label class="text-xs font-bold text-slate-500 uppercase tracking-wider">Expand AS-SETs</label>
+                    <button
+                        @click="expandSets = !expandSets; if(selectedCity) loadRoutingFlow()"
+                        class="relative w-12 h-6 rounded-full transition-colors"
+                        :class="expandSets ? 'bg-[#00A9E0]' : 'bg-slate-300'"
+                    >
+                        <span
+                            class="absolute top-1 w-4 h-4 bg-white rounded-full shadow transition-transform"
+                            :class="expandSets ? 'left-7' : 'left-1'"
+                        ></span>
+                    </button>
+                </div>
+
+                <div x-show="loading" class="flex items-center gap-2 text-slate-500">
+                    <svg class="animate-spin w-4 h-4" fill="none" viewBox="0 0 24 24">
+                        <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle>
+                        <path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
+                    </svg>
+                    <span class="text-xs font-medium">Loading hierarchy...</span>
+                </div>
+
+                <div class="ml-auto flex items-center gap-4">
+                    <div class="flex items-center gap-2 text-xs">
+                        <span class="w-3 h-3 rounded-full bg-[#00205B] border-2 border-[#00A9E0]"></span>
+                        <span class="text-slate-600">Zenlayer</span>
+                    </div>
+                    <div class="flex items-center gap-2 text-xs">
+                        <span class="w-3 h-3 rounded-full bg-[#00A9E0] border-2 border-[#00205B]"></span>
+                        <span class="text-slate-600">Direct Peers</span>
+                    </div>
+                    <div class="flex items-center gap-2 text-xs">
+                        <span class="w-3 h-3 rounded-full bg-slate-400 border-2 border-slate-500"></span>
+                        <span class="text-slate-600">Downstream</span>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Visualization Container -->
+    <main class="max-w-7xl mx-auto px-6 py-8">
+        <div
+            x-show="!selectedCity"
+            class="bg-white rounded-2xl border border-slate-200 shadow-sm p-20 text-center"
+        >
+            <div class="w-16 h-16 bg-slate-100 rounded-2xl flex items-center justify-center mx-auto mb-6">
+                <svg class="w-8 h-8 text-slate-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 20l-5.447-2.724A1 1 0 013 16.382V5.618a1 1 0 011.447-.894L9 7m0 13l6-3m-6 3V7m6 10l4.553 2.276A1 1 0 0021 18.382V7.618a1 1 0 00-.553-.894L15 4m0 13V4m0 0L9 7" />
+                </svg>
+            </div>
+            <h3 class="text-xl font-bold text-slate-700">Select a Market</h3>
+            <p class="text-sm text-slate-500 mt-2">Choose a market from the dropdown to visualize the routing hierarchy.</p>
+        </div>
+
+        <div
+            x-show="selectedCity && !loading && treeData"
+            class="bg-white rounded-2xl border border-slate-200 shadow-sm overflow-hidden"
+        >
+            <div class="border-b border-slate-100 px-6 py-4 flex items-center justify-between">
+                <div>
+                    <h2 class="font-bold text-slate-800" x-text="'Routing Flow: ' + selectedCity"></h2>
+                    <p class="text-xs text-slate-500 mt-1">
+                        <span x-text="peerCount"></span> direct peers
+                        <span x-show="expandSets"> &bull; <span x-text="downstreamCount"></span> downstream ASNs</span>
+                    </p>
+                </div>
+                <div class="flex items-center gap-2">
+                    <button @click="resetZoom()" class="px-3 py-1.5 text-xs font-bold text-slate-600 bg-slate-100 rounded-lg hover:bg-slate-200 transition-colors">
+                        Reset View
+                    </button>
+                    <button @click="expandAll()" class="px-3 py-1.5 text-xs font-bold text-slate-600 bg-slate-100 rounded-lg hover:bg-slate-200 transition-colors">
+                        Expand All
+                    </button>
+                    <button @click="collapseAll()" class="px-3 py-1.5 text-xs font-bold text-slate-600 bg-slate-100 rounded-lg hover:bg-slate-200 transition-colors">
+                        Collapse All
+                    </button>
+                </div>
+            </div>
+            <div id="tree-container" class="w-full" style="height: 700px;"></div>
+        </div>
+
+        <div
+            x-show="selectedCity && !loading && !treeData"
+            class="bg-white rounded-2xl border border-slate-200 shadow-sm p-12 text-center"
+        >
+            <p class="text-slate-500">No routing data available for this market.</p>
+        </div>
+    </main>
+
+    <!-- Tooltip -->
+    <div id="tooltip" class="tooltip" style="display: none;"></div>
+
+    <script>
+        console.log('[Routing] Script loaded at', new Date().toISOString());
+
+        function routingFlow() {
+            return {
+                selectedCity: '',
+                expandSets: false,
+                loading: false,
+                treeData: null,
+                peerCount: 0,
+                downstreamCount: 0,
+                svg: null,
+                root: null,
+                treemap: null,
+                zoom: null,
+                gRef: null,
+
+                init() {
+                    console.log('[Routing] Alpine component initialized');
+
+                    // Check if cities were loaded via Jinja2
+                    const citySelect = document.querySelector('select[x-model="selectedCity"]');
+                    const optionCount = citySelect ? citySelect.options.length - 1 : 0; // -1 for "Select Market..."
+                    console.log('[Routing] Cities in dropdown:', optionCount);
+
+                    // If no cities loaded from server, fetch from API
+                    if (optionCount === 0) {
+                        console.log('[Routing] No cities from server, fetching from API...');
+                        this.loadCitiesFromAPI(citySelect);
+                    }
+
+                    // Use $watch to reactively trigger rendering when treeData changes
+                    this.$watch('treeData', (value) => {
+                        console.log('[Routing] $watch treeData changed:', !!value);
+                        if (value && !this.loading) {
+                            this.$nextTick(() => {
+                                console.log('[Routing] $nextTick after treeData watch, calling renderTree');
+                                this.renderTree();
+                            });
+                        }
+                    });
+                },
+
+                async loadCitiesFromAPI(selectEl) {
+                    try {
+                        const response = await fetch('/audit/api/settings');
+                        if (response.ok) {
+                            const data = await response.json();
+                            const cities = data.discovered_cities || [];
+                            console.log('[Routing] Fetched cities from API:', cities.length);
+                            cities.forEach(city => {
+                                const opt = document.createElement('option');
+                                opt.value = city;
+                                opt.textContent = city;
+                                selectEl.appendChild(opt);
+                            });
+                        }
+                    } catch (e) {
+                        console.error('[Routing] Failed to load cities from API:', e);
+                    }
+                },
+
+                async loadRoutingFlow() {
+                    console.log('[Routing] loadRoutingFlow called', { city: this.selectedCity });
+                    if (!this.selectedCity) return;
+
+                    this.loading = true;
+                    this.treeData = null;
+
+                    try {
+                        const url = `/audit/api/routing-flow?location=${encodeURIComponent(this.selectedCity)}&expand_sets=${this.expandSets}`;
+                        const response = await fetch(url);
+                        if (!response.ok) throw new Error('Failed to load routing data');
+
+                        const data = await response.json();
+                        this.peerCount = data.children?.length || 0;
+                        this.downstreamCount = data.children?.reduce((acc, peer) => acc + (peer.children?.length || 0), 0) || 0;
+
+                        // Set loading false FIRST so the container becomes visible
+                        this.loading = false;
+                        // Then set treeData — $watch will trigger renderTree
+                        this.treeData = data;
+
+                    } catch (err) {
+                        console.error('Error loading routing flow:', err);
+                        this.loading = false;
+                    }
+                },
+
+                renderTree(retryCount) {
+                    retryCount = retryCount || 0;
+                    try {
+                        console.log('[Routing] renderTree() called, retry:', retryCount);
+
+                        const container = document.getElementById('tree-container');
+
+                        if (!container || !this.treeData) {
+                            console.error('[Routing] Missing container or data');
+                            return;
+                        }
+
+                        // If container isn't visible yet (zero width), retry after a short delay
+                        if (container.clientWidth === 0 && retryCount < 5) {
+                            console.log('[Routing] Container not visible yet, retrying...');
+                            setTimeout(() => this.renderTree(retryCount + 1), 150);
+                            return;
+                        }
+
+                        // Clear previous
+                        d3.select('#tree-container').selectAll('*').remove();
+
+                        const width = container.clientWidth || 1200;
+                        const peerCount = this.treeData.children?.length || 0;
+                        const height = Math.max(700, peerCount * 25);
+
+                        console.log('[Routing] Dimensions:', { width, height, peers: peerCount });
+
+                    const margin = { top: 40, right: 250, bottom: 40, left: 150 };
+
+                    // Create SVG
+                    console.log('[Routing] Creating SVG');
+                    this.svg = d3.select('#tree-container')
+                        .append('svg')
+                        .attr('width', width)
+                        .attr('height', height)
+                        .style('background', '#fafafa');
+
+                    // Create group first (before zoom references it)
+                    this.gRef = this.svg.append('g')
+                        .attr('transform', `translate(${margin.left},${margin.top})`);
+
+                    // Now setup zoom
+                    const gRef = this.gRef; // Local reference for closure
+                    this.zoom = d3.zoom()
+                        .scaleExtent([0.2, 3])
+                        .on('zoom', (event) => {
+                            gRef.attr('transform', event.transform);
+                        });
+
+                    this.svg.call(this.zoom);
+                    console.log('[Routing] SVG created, gRef:', this.gRef);
+
+                    // Create tree layout - swap dimensions for horizontal tree
+                    const innerWidth = width - margin.left - margin.right;
+                    const innerHeight = height - margin.top - margin.bottom;
+
+                    this.treemap = d3.tree().size([innerHeight, innerWidth]);
+
+                    // Create hierarchy
+                    this.root = d3.hierarchy(this.treeData, d => d.children);
+                    this.root.x0 = innerHeight / 2;
+                    this.root.y0 = 0;
+
+                    // Initially collapse peers with many children
+                    if (this.root.children) {
+                        this.root.children.forEach(child => {
+                            if (child.children && child.children.length > 5) {
+                                child._children = child.children;
+                                child.children = null;
+                            }
+                        });
+                    }
+
+                    console.log('[Routing] Root hierarchy created', {
+                        rootChildren: this.root.children?.length,
+                        x0: this.root.x0,
+                        y0: this.root.y0
+                    });
+
+                    this.updateTree(this.root);
+                    console.log('[Routing] renderTree() completed successfully');
+                    } catch (err) {
+                        console.error('[Routing] Error in renderTree:', err);
+                    }
+                },
+
+                updateTree(source) {
+                    const duration = 300;
+                    const that = this;
+                    const g = this.gRef;
+
+                    // Compute the new tree layout
+                    const treeData = this.treemap(this.root);
+                    const nodes = treeData.descendants();
+                    const links = treeData.descendants().slice(1);
+
+                    console.log('[Routing] Update called', { nodes: nodes.length, links: links.length });
+
+                    // Normalize for fixed-depth (spread out horizontally)
+                    nodes.forEach(d => { d.y = d.depth * 350; });
+
+                    // ---- LINKS ----
+                    const link = g.selectAll('path.link')
+                        .data(links, d => d.id || (d.id = Math.random()));
+
+                    // Enter links
+                    const linkEnter = link.enter().insert('path', 'g')
+                        .attr('class', 'link')
+                        .attr('d', d => {
+                            const o = { x: source.x0 || 0, y: source.y0 || 0 };
+                            return this.diagonal(o, o);
+                        });
+
+                    // Update links
+                    linkEnter.merge(link)
+                        .transition()
+                        .duration(duration)
+                        .attr('d', d => this.diagonal(d, d.parent));
+
+                    // Remove old links
+                    link.exit()
+                        .transition()
+                        .duration(duration)
+                        .attr('d', d => {
+                            const o = { x: source.x, y: source.y };
+                            return this.diagonal(o, o);
+                        })
+                        .remove();
+
+                    // ---- NODES ----
+                    const node = g.selectAll('g.node')
+                        .data(nodes, d => d.id || (d.id = Math.random()));
+
+                    // Enter nodes
+                    const nodeEnter = node.enter().append('g')
+                        .attr('class', d => 'node' + (d.depth === 0 ? ' node-root' : d.depth === 1 ? ' node-peer' : ' node-downstream'))
+                        .attr('transform', d => `translate(${source.y0 || 0},${source.x0 || 0})`)
+                        .style('cursor', 'pointer')
+                        .on('click', (event, d) => {
+                            event.stopPropagation();
+                            if (d.children) {
+                                d._children = d.children;
+                                d.children = null;
+                            } else if (d._children) {
+                                d.children = d._children;
+                                d._children = null;
+                            }
+                            that.updateTree(d);
+                        })
+                        .on('mouseover', (event, d) => {
+                            const tooltip = document.getElementById('tooltip');
+                            let content = `<strong>${d.data.name || 'Unknown'}</strong>`;
+                            if (d.data.asn) content += `<br>ASN: ${d.data.asn}`;
+                            if (d.data.info_type) content += `<br>Type: ${d.data.info_type}`;
+                            if (d.data.irr_as_set) content += `<br>AS-SET: ${d.data.irr_as_set}`;
+                            const childCount = (d.children?.length || 0) + (d._children?.length || 0);
+                            if (childCount > 0) content += `<br>Children: ${childCount}`;
+                            tooltip.innerHTML = content;
+                            tooltip.style.display = 'block';
+                            tooltip.style.left = (event.pageX + 15) + 'px';
+                            tooltip.style.top = (event.pageY - 10) + 'px';
+                        })
+                        .on('mouseout', () => {
+                            document.getElementById('tooltip').style.display = 'none';
+                        });
+
+                    // Add circles
+                    nodeEnter.append('circle')
+                        .attr('r', d => d.depth === 0 ? 14 : (d.depth === 1 ? 9 : 6))
+                        .style('stroke-width', '2px');
+
+                    // Add labels
+                    nodeEnter.append('text')
+                        .attr('dy', '.35em')
+                        .attr('x', d => (d.children || d._children) ? -18 : 18)
+                        .attr('text-anchor', d => (d.children || d._children) ? 'end' : 'start')
+                        .style('font-size', d => d.depth === 0 ? '13px' : '11px')
+                        .style('font-weight', d => d.depth <= 1 ? '600' : '400')
+                        .style('fill', '#1e293b')
+                        .text(d => {
+                            const name = d.data.name || `AS${d.data.asn}`;
+                            return name.length > 35 ? name.substring(0, 33) + '...' : name;
+                        });
+
+                    // Add child count indicator
+                    nodeEnter.filter(d => d._children && d._children.length > 0)
+                        .append('text')
+                        .attr('dy', '.35em')
+                        .attr('x', 18)
+                        .style('font-size', '10px')
+                        .style('fill', '#64748b')
+                        .text(d => `(+${d._children.length})`);
+
+                    // Update: transition nodes to new position
+                    const nodeUpdate = nodeEnter.merge(node);
+
+                    nodeUpdate.transition()
+                        .duration(duration)
+                        .attr('transform', d => `translate(${d.y},${d.x})`);
+
+                    nodeUpdate.select('circle')
+                        .style('fill', d => d._children ? '#e2e8f0' : null);
+
+                    // Remove old nodes
+                    node.exit()
+                        .transition()
+                        .duration(duration)
+                        .attr('transform', d => `translate(${source.y},${source.x})`)
+                        .remove();
+
+                    // Store positions for next transition
+                    nodes.forEach(d => {
+                        d.x0 = d.x;
+                        d.y0 = d.y;
+                    });
+                },
+
+                diagonal(s, d) {
+                    return `M ${s.y} ${s.x}
+                            C ${(s.y + d.y) / 2} ${s.x},
+                              ${(s.y + d.y) / 2} ${d.x},
+                              ${d.y} ${d.x}`;
+                },
+
+                resetZoom() {
+                    if (this.svg && this.zoom) {
+                        this.svg.transition().duration(500).call(
+                            this.zoom.transform,
+                            d3.zoomIdentity
+                        );
+                    }
+                },
+
+                expandAll() {
+                    if (!this.root) return;
+                    const expand = (d) => {
+                        if (d._children) {
+                            d.children = d._children;
+                            d._children = null;
+                        }
+                        if (d.children) d.children.forEach(expand);
+                    };
+                    expand(this.root);
+                    this.updateTree(this.root);
+                },
+
+                collapseAll() {
+                    if (!this.root) return;
+                    const collapse = (d) => {
+                        if (d.children && d.depth > 0) {
+                            d._children = d.children;
+                            d.children = null;
+                        }
+                        if (d._children) d._children.forEach(collapse);
+                    };
+                    if (this.root.children) {
+                        this.root.children.forEach(collapse);
+                    }
+                    this.updateTree(this.root);
+                }
+            };
+        }
+    </script>
+</body>
+</html>

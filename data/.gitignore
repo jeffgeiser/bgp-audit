@@ -1,0 +1,6 @@
+# Ignore data files but keep directory
+*.json
+*.sqlite3
+*.db
+!.gitkeep
+!.gitignore
