@@ -19,7 +19,7 @@
         .donut-logo {
             background: linear-gradient(to right, #33d4ff, #0076ff) border-box;
             -webkit-mask: linear-gradient(#fff 0 0) padding-box, linear-gradient(#fff 0 0);
-            -webkit-mask-composite: destination-out;
+            -webkit-mask-composite: xor;
             mask-composite: exclude;
         }
         /* Light theme (default) */
@@ -167,28 +167,23 @@
                             </template>
                         </div>
                     </template>
-                    <div x-show="!selectedCity"
-                         class="text-center py-12 opacity-50 italic text-xs font-medium rounded-2xl border border-dashed"
-                         :class="darkMode ? 'bg-white/5 border-white/10' : 'bg-slate-50 border-slate-200 text-slate-500'">
-                        Select a market to view facilities
-                    </div>
                 </div>
             </div>
         </div>
 
         <div class="p-6 space-y-2" :class="darkMode ? 'bg-black/10 border-t border-white/5' : 'bg-slate-100 border-t border-slate-200'">
+            <!-- Routing Flow button hidden for now
             <a href="/audit/routing" class="w-full flex items-center justify-center space-x-2 bg-[#00A9E0]/20 hover:bg-[#00A9E0]/30 py-2.5 rounded-xl border border-[#00A9E0]/30 transition-all text-[10px] font-black uppercase tracking-widest"
                :class="darkMode ? 'text-white' : 'text-[#00205B]'">
                 <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 20l-5.447-2.724A1 1 0 013 16.382V5.618a1 1 0 011.447-.894L9 7m0 13l6-3m-6 3V7m6 10l4.553 2.276A1 1 0 0021 18.382V7.618a1 1 0 00-.553-.894L15 4m0 13V4m0 0L9 7" /></svg>
                 <span>Routing Flow</span>
             </a>
+            -->
             <a href="/audit/settings" class="w-full flex items-center justify-center space-x-2 py-2.5 rounded-xl border transition-all text-[10px] font-black uppercase tracking-widest"
                :class="darkMode ? 'bg-white/5 hover:bg-white/10 border-white/10 text-white' : 'bg-white hover:bg-slate-50 border-slate-200 text-slate-600'">
                 <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M10.343 3.94c.09-.542.56-.94 1.11-.94h1.093c.55 0 1.02.398 1.11.94l.149.894c.07.424.384.764.78.93s.844.083 1.18-.166l.715-.495a1.14 1.14 0 011.56.208l.774.774a1.14 1.14 0 01.208 1.56l-.495.715c-.249.336-.232.842-.166 1.18s.506.71.93.78l.894.15c.542.09.94.56.94 1.109v1.094c0 .55-.398 1.02-.94 1.11l-.894.149c-.424.07-.764.384-.93.78s-.083.844.166 1.18l.495.715a1.14 1.14 0 01-.208 1.56l-.774.774a1.14 1.14 0 01-1.56.208l-.715-.495c-.336-.249-.842-.232-1.18-.166s-.71.506-.78.93l-.15.894c-.09.542-.56.94-1.109.94h-1.094c-.55 0-1.02-.398-1.11-.94l-.149-.894c-.07-.424-.384-.764-.78-.93s-.844-.083-1.18.166l-.715.495a1.14 1.14 0 01-1.56-.208l-.774-.774a1.14 1.14 0 01-.208-1.56l.495-.715c.249-.336.232-.842.166-1.18s-.506-.71-.93-.78l-.894-.15c-.542-.09-.94-.56-.94-1.109v-1.094c0-.55.398-1.02.94-1.11l.894-.149c.424-.07.764-.384.93-.78s.083-.844-.166-1.18l-.495-.715a1.14 1.14 0 01.208-1.56l.774-.774a1.14 1.14 0 011.56-.208l.715.495c.336.249.842.232 1.18.166s.71-.506.78-.93l.15-.894z" /><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z" /></svg>
                 <span>Audit Settings</span>
             </a>
-            <p class="text-[9px] uppercase tracking-[0.3em] font-bold mt-4 text-center"
-               :class="darkMode ? 'text-white/20' : 'text-slate-400'">Zenlayer Net Footprint</p>
         </div>
     </aside>
 
@@ -196,22 +191,7 @@
     <main class="flex-1 px-8 py-5 flex flex-col gap-4 overflow-y-auto transition-colors duration-300"
           :class="darkMode ? 'bg-slate-900' : 'bg-slate-50'">
         <!-- Dashboard Header -->
-        <header class="flex justify-between items-center">
-            <div>
-                <nav class="flex text-[10px] font-bold uppercase tracking-widest mb-1 gap-2 items-center"
-                     :class="darkMode ? 'text-slate-500' : 'text-slate-400'">
-                    <span class="px-2 py-0.5 rounded"
-                          :class="isMarketScope
-                              ? (darkMode ? 'bg-indigo-900/50 text-indigo-400' : 'bg-indigo-50 text-indigo-600')
-                              : (darkMode ? 'bg-slate-800 text-slate-400' : 'bg-slate-100 text-slate-600')"
-                          x-text="isMarketScope ? 'MARKET AGGREGATION' : 'SITE AUDIT'"></span>
-                    <span>/</span>
-                    <span class="text-[#00A9E0]" x-text="viewModeLabel"></span>
-                </nav>
-                <h1 class="text-2xl font-black tracking-tight leading-none"
-                    :class="darkMode ? 'text-white' : 'text-[#00205B]'" x-text="displayTitle"></h1>
-            </div>
-
+        <header class="flex justify-center items-center">
             <!-- View Mode Filter & Actions -->
             <div class="flex items-center gap-3">
                 <div class="flex items-center p-1.5 rounded-2xl border shadow-sm"
@@ -464,15 +444,13 @@
                      :class="darkMode ? 'bg-slate-800' : 'bg-slate-100'">
                     <svg class="w-8 h-8" :class="darkMode ? 'text-slate-600' : 'text-slate-400'" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z" /></svg>
                 </div>
-                <h3 class="text-xl font-black" :class="darkMode ? 'text-slate-300' : 'text-slate-700'">Scope Pending</h3>
-                <p class="text-sm mt-2 font-medium" :class="darkMode ? 'text-slate-500' : 'text-slate-400'">Select a global market or individual data center facility from the sidebar to begin auditing.</p>
+                <p class="text-sm font-medium" :class="darkMode ? 'text-slate-500' : 'text-slate-400'">Select a market to view networks</p>
             </div>
         </div>
 
         <footer class="flex-shrink-0 flex justify-between items-center text-[10px] font-black uppercase tracking-[0.3em] py-2 mt-auto"
                 :class="darkMode ? 'text-slate-600' : 'text-slate-400'">
             <p>Source: PeeringDB API</p>
-            <p>&copy; Zenlayer Global Operations</p>
         </footer>
     </main>
 
