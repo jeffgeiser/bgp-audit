@@ -601,6 +601,11 @@ async def dashboard_home(request: Request):
 async def settings_page(request: Request):
     """Serve the settings editor UI."""
     return templates.TemplateResponse("settings.html", {"request": request})
+
+@app.get("/routing", response_class=HTMLResponse)
+async def routing_page(request: Request):
+    """Serve the routing flow visualization UI."""
+    return templates.TemplateResponse("routing.html", {"request": request})
 @app.get("/api/settings")
 async def get_settings():
     """Return the current configuration plus all unique cities found in footprint."""
