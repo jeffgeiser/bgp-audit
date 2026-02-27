@@ -7,10 +7,11 @@
     <title>Zenlayer | BGP Audit Hub</title>
     <script src="https://cdn.tailwindcss.com"></script>
     <script defer src="https://cdn.jsdelivr.net/npm/alpinejs@3.x.x/dist/cdn.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
     <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap" rel="stylesheet">
     <style>
         [x-cloak] { display: none !important; }
-        body { font-family: 'Inter', sans-serif; background-color: #f8fafc; }
+        body { font-family: 'Inter', sans-serif; }
         .custom-scrollbar::-webkit-scrollbar { width: 4px; }
         .custom-scrollbar::-webkit-scrollbar-thumb { background: #cbd5e1; border-radius: 10px; }
         .btn-toggle { transition: all 0.2s cubic-bezier(0.4, 0, 0.2, 1); }
@@ -21,25 +22,61 @@
             -webkit-mask-composite: destination-out;
             mask-composite: exclude;
         }
+        /* Light theme (default) */
+        :root {
+            --bg-primary: #f8fafc;
+            --bg-secondary: #ffffff;
+            --sidebar-bg: #f1f5f9;
+            --sidebar-text: #0f172a;
+            --sidebar-muted: #64748b;
+            --sidebar-border: #e2e8f0;
+            --sidebar-hover: #e2e8f0;
+            --sidebar-active-bg: #00205B;
+            --sidebar-active-text: #ffffff;
+            --text-primary: #0f172a;
+            --text-muted: #64748b;
+            --border-color: #e2e8f0;
+        }
+        /* Dark theme */
+        .dark {
+            --bg-primary: #0f172a;
+            --bg-secondary: #1e293b;
+            --sidebar-bg: #00205B;
+            --sidebar-text: #ffffff;
+            --sidebar-muted: rgba(255,255,255,0.4);
+            --sidebar-border: rgba(255,255,255,0.1);
+            --sidebar-hover: rgba(255,255,255,0.1);
+            --sidebar-active-bg: #ffffff;
+            --sidebar-active-text: #00205B;
+            --text-primary: #f8fafc;
+            --text-muted: #94a3b8;
+            --border-color: #334155;
+        }
+        body { background-color: var(--bg-primary); }
     </style>
 </head>
-<body class="flex min-h-screen text-slate-900" x-data="auditDashboard()">
+<body class="flex min-h-screen text-slate-900" x-data="auditDashboard()" :class="{ 'dark': darkMode }">
     <!-- Sidebar -->
-    <aside class="w-80 bg-[#00205B] text-white h-screen sticky top-0 flex flex-col shadow-2xl z-30">
-        <div class="p-8 border-b border-white/10 flex items-center space-x-2.5">
+    <aside class="w-80 h-screen sticky top-0 flex flex-col shadow-2xl z-30 transition-colors duration-300"
+           :class="darkMode ? 'bg-[#00205B] text-white' : 'bg-slate-50 text-slate-900 border-r border-slate-200'">
+        <div class="p-8 flex items-center space-x-2.5"
+             :class="darkMode ? 'border-b border-white/10' : 'border-b border-slate-200'">
             <div class="relative w-8 h-8 flex items-center justify-center">
                 <div class="absolute inset-0 rounded-full border-[5px] border-transparent donut-logo"></div>
             </div>
             <div class="flex flex-col">
-                <span class="text-[22px] font-medium text-white tracking-tight leading-none">zenlayer</span>
-                <span class="text-[9px] font-bold text-white/40 uppercase tracking-[0.2em] mt-0.5 leading-none">BGP Explorer</span>
+                <span class="text-[22px] font-medium tracking-tight leading-none"
+                      :class="darkMode ? 'text-white' : 'text-[#00205B]'">zenlayer</span>
+                <span class="text-[9px] font-bold uppercase tracking-[0.2em] mt-0.5 leading-none"
+                      :class="darkMode ? 'text-white/40' : 'text-slate-400'">BGP Explorer</span>
             </div>
         </div>
 
         <div class="flex-1 overflow-y-auto p-6 space-y-10 custom-scrollbar">
             <!-- Filter by City -->
             <div class="space-y-4" x-data="{ cityDropdownOpen: false }">
-                <label class="text-[10px] font-black text-white/40 uppercase tracking-[0.2em] flex items-center gap-2">
+                <label class="text-[10px] font-black uppercase tracking-[0.2em] flex items-center gap-2"
+                       :class="darkMode ? 'text-white/40' : 'text-slate-400'">
                     <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path d="M3.055 11H5a2 2 0 012 2v1a2 2 0 002 2 2 2 0 012 2v2.945M8 3.935V5.5A2.5 2.5 0 0010.5 8h.5a2 2 0 012 2 2 2 0 104 0 2 2 0 012-2h1.064M15 20.488V18a2 2 0 012-2h3.064M21 12a9 9 0 11-18 0 9 9 0 0118 0z" stroke-width="2"/></svg>
                     Global Markets
                 </label>
@@ -49,7 +86,9 @@
                         @click="cityDropdownOpen = !cityDropdownOpen"
                         @click.outside="cityDropdownOpen = false"
                         class="w-full flex items-center justify-between px-4 py-3.5 rounded-xl text-sm transition-all border"
-                        :class="selectedCity ? 'bg-white text-[#00205B] font-semibold shadow-lg border-white' : 'bg-white/10 border-white/10 text-white/80 hover:bg-white/15'"
+                        :class="selectedCity
+                            ? (darkMode ? 'bg-white text-[#00205B] font-semibold shadow-lg border-white' : 'bg-[#00205B] text-white font-semibold shadow-lg border-[#00205B]')
+                            : (darkMode ? 'bg-white/10 border-white/10 text-white/80 hover:bg-white/15' : 'bg-white border-slate-200 text-slate-600 hover:bg-slate-50')"
                     >
                         <div class="flex items-center gap-3">
                             <svg class="w-4 h-4 opacity-60" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M17.657 16.657L13.414 20.9a1.998 1.998 0 01-2.827 0l-4.244-4.243a8 8 0 1111.314 0z" /><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 11a3 3 0 11-6 0 3 3 0 016 0z" /></svg>
@@ -90,17 +129,20 @@
 
             <!-- Filter by Facility -->
             <div class="space-y-4">
-                <label class="text-[10px] font-black text-white/40 uppercase tracking-[0.2em] flex items-center gap-2">
+                <label class="text-[10px] font-black uppercase tracking-[0.2em] flex items-center gap-2"
+                       :class="darkMode ? 'text-white/40' : 'text-slate-400'">
                     <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path d="M19 21V5a2 2 0 00-2-2H7a2 2 0 00-2 2v16m14 0h2m-2 0h-5m-9 0H3m2 0h5M9 7h1m-1 4h1m4-4h1m-1 4h1m-5 10v-5a1 1 0 011-1h2a1 1 0 011 1v5m-4 0h4" stroke-width="2"/></svg>
                     Audit Scope
                 </label>
                 <div class="space-y-2 max-h-[500px] overflow-y-auto pr-2 custom-scrollbar">
                     <template x-if="selectedCity">
                         <div class="space-y-2">
-                             <button 
+                             <button
                                 @click="scanMarket()"
                                 class="w-full flex items-center justify-between px-4 py-4 rounded-xl text-xs transition-all border"
-                                :class="isMarketScope ? 'bg-[#00A9E0] border-[#00A9E0] text-white shadow-xl font-bold' : 'bg-white/10 border-white/5 text-white/80 hover:bg-white/20'"
+                                :class="isMarketScope
+                                    ? 'bg-[#00A9E0] border-[#00A9E0] text-white shadow-xl font-bold'
+                                    : (darkMode ? 'bg-white/10 border-white/5 text-white/80 hover:bg-white/20' : 'bg-white border-slate-200 text-slate-600 hover:bg-slate-50')"
                             >
                                 <div class="flex items-center gap-3">
                                     <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M17.657 16.657L13.414 20.9a1.998 1.998 0 01-2.827 0l-4.244-4.243a8 8 0 1111.314 0z" /><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 11a3 3 0 11-6 0 3 3 0 016 0z" /></svg>
@@ -109,13 +151,15 @@
                                 <div x-show="isMarketScope" class="w-2 h-2 bg-white rounded-full animate-pulse"></div>
                             </button>
 
-                            <div class="h-px bg-white/10 my-4"></div>
+                            <div class="h-px my-4" :class="darkMode ? 'bg-white/10' : 'bg-slate-200'"></div>
 
                             <template x-for="fac in filteredFacilities" :key="fac.id">
-                                <button 
+                                <button
                                     @click="selectFacility(fac)"
                                     class="sidebar-btn group w-full text-left px-4 py-3 rounded-xl text-sm transition-all border border-transparent"
-                                    :class="selectedFacId === fac.id && !isMarketScope ? 'bg-white text-[#00205B] font-bold shadow-lg' : 'hover:bg-white/5 text-white/60'"
+                                    :class="selectedFacId === fac.id && !isMarketScope
+                                        ? (darkMode ? 'bg-white text-[#00205B] font-bold shadow-lg' : 'bg-[#00205B] text-white font-bold shadow-lg')
+                                        : (darkMode ? 'hover:bg-white/5 text-white/60' : 'hover:bg-slate-100 text-slate-600')"
                                 >
                                     <div class="truncate" x-text="fac.name"></div>
                                     <div class="text-[10px] mt-0.5 opacity-50" x-text="'Data Center Facility'"></div>
@@ -123,54 +167,75 @@
                             </template>
                         </div>
                     </template>
-                    <div x-show="!selectedCity" class="text-center py-12 opacity-20 italic text-xs font-medium bg-white/5 rounded-2xl border border-dashed border-white/10">Select a market to view facilities</div>
+                    <div x-show="!selectedCity"
+                         class="text-center py-12 opacity-50 italic text-xs font-medium rounded-2xl border border-dashed"
+                         :class="darkMode ? 'bg-white/5 border-white/10' : 'bg-slate-50 border-slate-200 text-slate-500'">
+                        Select a market to view facilities
+                    </div>
                 </div>
             </div>
         </div>
 
-        <div class="p-6 bg-black/10 border-t border-white/5 space-y-2">
-            <a href="/audit/routing" class="w-full flex items-center justify-center space-x-2 bg-[#00A9E0]/20 hover:bg-[#00A9E0]/30 py-2.5 rounded-xl border border-[#00A9E0]/30 transition-all text-[10px] font-black uppercase tracking-widest">
+        <div class="p-6 space-y-2" :class="darkMode ? 'bg-black/10 border-t border-white/5' : 'bg-slate-100 border-t border-slate-200'">
+            <a href="/audit/routing" class="w-full flex items-center justify-center space-x-2 bg-[#00A9E0]/20 hover:bg-[#00A9E0]/30 py-2.5 rounded-xl border border-[#00A9E0]/30 transition-all text-[10px] font-black uppercase tracking-widest"
+               :class="darkMode ? 'text-white' : 'text-[#00205B]'">
                 <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 20l-5.447-2.724A1 1 0 013 16.382V5.618a1 1 0 011.447-.894L9 7m0 13l6-3m-6 3V7m6 10l4.553 2.276A1 1 0 0021 18.382V7.618a1 1 0 00-.553-.894L15 4m0 13V4m0 0L9 7" /></svg>
                 <span>Routing Flow</span>
             </a>
-            <a href="/audit/settings" class="w-full flex items-center justify-center space-x-2 bg-white/5 hover:bg-white/10 py-2.5 rounded-xl border border-white/10 transition-all text-[10px] font-black uppercase tracking-widest">
+            <a href="/audit/settings" class="w-full flex items-center justify-center space-x-2 py-2.5 rounded-xl border transition-all text-[10px] font-black uppercase tracking-widest"
+               :class="darkMode ? 'bg-white/5 hover:bg-white/10 border-white/10 text-white' : 'bg-white hover:bg-slate-50 border-slate-200 text-slate-600'">
                 <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M10.343 3.94c.09-.542.56-.94 1.11-.94h1.093c.55 0 1.02.398 1.11.94l.149.894c.07.424.384.764.78.93s.844.083 1.18-.166l.715-.495a1.14 1.14 0 011.56.208l.774.774a1.14 1.14 0 01.208 1.56l-.495.715c-.249.336-.232.842-.166 1.18s.506.71.93.78l.894.15c.542.09.94.56.94 1.109v1.094c0 .55-.398 1.02-.94 1.11l-.894.149c-.424.07-.764.384-.93.78s-.083.844.166 1.18l.495.715a1.14 1.14 0 01-.208 1.56l-.774.774a1.14 1.14 0 01-1.56.208l-.715-.495c-.336-.249-.842-.232-1.18-.166s-.71.506-.78.93l-.15.894c-.09.542-.56.94-1.109.94h-1.094c-.55 0-1.02-.398-1.11-.94l-.149-.894c-.07-.424-.384-.764-.78-.93s-.844-.083-1.18.166l-.715.495a1.14 1.14 0 01-1.56-.208l-.774-.774a1.14 1.14 0 01-.208-1.56l.495-.715c.249-.336.232-.842.166-1.18s-.506-.71-.93-.78l-.894-.15c-.542-.09-.94-.56-.94-1.109v-1.094c0-.55.398-1.02.94-1.11l.894-.149c.424-.07.764-.384.93-.78s.083-.844-.166-1.18l-.495-.715a1.14 1.14 0 01.208-1.56l.774-.774a1.14 1.14 0 011.56-.208l.715.495c.336.249.842.232 1.18.166s.71-.506.78-.93l.15-.894z" /><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z" /></svg>
                 <span>Audit Settings</span>
             </a>
-            <p class="text-[9px] text-white/20 uppercase tracking-[0.3em] font-bold mt-4 text-center">Zenlayer Net Footprint</p>
+            <p class="text-[9px] uppercase tracking-[0.3em] font-bold mt-4 text-center"
+               :class="darkMode ? 'text-white/20' : 'text-slate-400'">Zenlayer Net Footprint</p>
         </div>
     </aside>
 
     <!-- Main Content -->
-    <main class="flex-1 px-8 py-5 flex flex-col gap-4 overflow-y-auto">
+    <main class="flex-1 px-8 py-5 flex flex-col gap-4 overflow-y-auto transition-colors duration-300"
+          :class="darkMode ? 'bg-slate-900' : 'bg-slate-50'">
         <!-- Dashboard Header -->
         <header class="flex justify-between items-center">
             <div>
-                <nav class="flex text-[10px] font-bold text-slate-400 uppercase tracking-widest mb-1 gap-2 items-center">
-                    <span class="px-2 py-0.5 rounded" :class="isMarketScope ? 'bg-indigo-50 text-indigo-600' : 'bg-slate-100 text-slate-600'" x-text="isMarketScope ? 'MARKET AGGREGATION' : 'SITE AUDIT'"></span>
+                <nav class="flex text-[10px] font-bold uppercase tracking-widest mb-1 gap-2 items-center"
+                     :class="darkMode ? 'text-slate-500' : 'text-slate-400'">
+                    <span class="px-2 py-0.5 rounded"
+                          :class="isMarketScope
+                              ? (darkMode ? 'bg-indigo-900/50 text-indigo-400' : 'bg-indigo-50 text-indigo-600')
+                              : (darkMode ? 'bg-slate-800 text-slate-400' : 'bg-slate-100 text-slate-600')"
+                          x-text="isMarketScope ? 'MARKET AGGREGATION' : 'SITE AUDIT'"></span>
                     <span>/</span>
                     <span class="text-[#00A9E0]" x-text="viewModeLabel"></span>
                 </nav>
-                <h1 class="text-2xl font-black text-[#00205B] tracking-tight leading-none" x-text="displayTitle"></h1>
+                <h1 class="text-2xl font-black tracking-tight leading-none"
+                    :class="darkMode ? 'text-white' : 'text-[#00205B]'" x-text="displayTitle"></h1>
             </div>
-            
-            <!-- View Mode Filter -->
-            <div class="flex items-center gap-2">
-                <div class="flex items-center bg-white p-1.5 rounded-2xl border border-slate-200 shadow-sm">
+
+            <!-- View Mode Filter & Actions -->
+            <div class="flex items-center gap-3">
+                <div class="flex items-center p-1.5 rounded-2xl border shadow-sm"
+                     :class="darkMode ? 'bg-slate-800 border-slate-700' : 'bg-white border-slate-200'">
                     <button
                         @click="setMode('upstream')"
                         class="btn-toggle px-5 py-2.5 rounded-xl text-[10px] font-black uppercase tracking-wider"
-                        :class="viewMode === 'upstream' ? 'bg-[#00205B] text-white shadow-xl scale-[1.05]' : 'text-slate-500 hover:text-slate-800'"
+                        :class="viewMode === 'upstream'
+                            ? 'bg-[#00205B] text-white shadow-xl scale-[1.05]'
+                            : (darkMode ? 'text-slate-400 hover:text-slate-200' : 'text-slate-500 hover:text-slate-800')"
                     >Upstream</button>
                     <button
                         @click="setMode('peers')"
                         class="btn-toggle px-5 py-2.5 rounded-xl text-[10px] font-black uppercase tracking-wider"
-                        :class="viewMode === 'peers' ? 'bg-[#00205B] text-white shadow-xl scale-[1.05]' : 'text-slate-500 hover:text-slate-800'"
+                        :class="viewMode === 'peers'
+                            ? 'bg-[#00205B] text-white shadow-xl scale-[1.05]'
+                            : (darkMode ? 'text-slate-400 hover:text-slate-200' : 'text-slate-500 hover:text-slate-800')"
                     >Content & Peers</button>
                     <button
                         @click="setMode('all')"
                         class="btn-toggle px-5 py-2.5 rounded-xl text-[10px] font-black uppercase tracking-wider"
-                        :class="viewMode === 'all' ? 'bg-[#00205B] text-white shadow-xl scale-[1.05]' : 'text-slate-500 hover:text-slate-800'"
+                        :class="viewMode === 'all'
+                            ? 'bg-[#00205B] text-white shadow-xl scale-[1.05]'
+                            : (darkMode ? 'text-slate-400 hover:text-slate-200' : 'text-slate-500 hover:text-slate-800')"
                     >All Networks</button>
                 </div>
 
@@ -178,10 +243,11 @@
                 <div class="relative" x-data="{ showFilterInfo: false }">
                     <button
                         @click="showFilterInfo = !showFilterInfo"
-                        class="w-7 h-7 rounded-full bg-slate-100 hover:bg-slate-200 flex items-center justify-center transition-colors"
+                        class="w-7 h-7 rounded-full flex items-center justify-center transition-colors"
+                        :class="darkMode ? 'bg-slate-800 hover:bg-slate-700' : 'bg-slate-100 hover:bg-slate-200'"
                         title="Filter information"
                     >
-                        <svg class="w-4 h-4 text-slate-500" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <svg class="w-4 h-4" :class="darkMode ? 'text-slate-400' : 'text-slate-500'" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                             <circle cx="12" cy="12" r="10" stroke-width="2"></circle>
                             <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 16v-4m0-4h.01"></path>
                         </svg>
@@ -197,42 +263,63 @@
                         x-transition:leave="transition ease-in duration-150"
                         x-transition:leave-start="opacity-100 scale-100"
                         x-transition:leave-end="opacity-0 scale-95"
-                        class="absolute right-0 top-10 w-80 bg-white rounded-xl shadow-2xl border border-slate-200 p-4 z-[100]"
+                        class="absolute right-0 top-10 w-80 rounded-xl shadow-2xl border p-4 z-[100]"
+                        :class="darkMode ? 'bg-slate-800 border-slate-700' : 'bg-white border-slate-200'"
                         style="display: none;"
                     >
                         <div class="space-y-3">
                             <div>
-                                <h4 class="text-xs font-black text-[#00205B] uppercase tracking-wider mb-1">Upstream</h4>
-                                <p class="text-xs text-slate-600 leading-relaxed">Filters for transit providers—the backbone networks connecting Zenlayer to the broader internet.</p>
+                                <h4 class="text-xs font-black uppercase tracking-wider mb-1"
+                                    :class="darkMode ? 'text-white' : 'text-[#00205B]'">Upstream</h4>
+                                <p class="text-xs leading-relaxed" :class="darkMode ? 'text-slate-400' : 'text-slate-600'">Filters for transit providers—the backbone networks connecting Zenlayer to the broader internet.</p>
                             </div>
-                            <div class="h-px bg-slate-100"></div>
+                            <div class="h-px" :class="darkMode ? 'bg-slate-700' : 'bg-slate-100'"></div>
                             <div>
-                                <h4 class="text-xs font-black text-[#00205B] uppercase tracking-wider mb-1">Content & Peers</h4>
-                                <p class="text-xs text-slate-600 leading-relaxed">Isolates direct peering partners and content networks (e.g., Akamai, Netflix) to show what is reached without transit middlemen.</p>
+                                <h4 class="text-xs font-black uppercase tracking-wider mb-1"
+                                    :class="darkMode ? 'text-white' : 'text-[#00205B]'">Content & Peers</h4>
+                                <p class="text-xs leading-relaxed" :class="darkMode ? 'text-slate-400' : 'text-slate-600'">Isolates direct peering partners and content networks (e.g., Akamai, Netflix) to show what is reached without transit middlemen.</p>
                             </div>
-                            <div class="h-px bg-slate-100"></div>
+                            <div class="h-px" :class="darkMode ? 'bg-slate-700' : 'bg-slate-100'"></div>
                             <div>
-                                <h4 class="text-xs font-black text-[#00205B] uppercase tracking-wider mb-1">All Networks</h4>
-                                <p class="text-xs text-slate-600 leading-relaxed">The de-duplicated baseline showing every unique ASN reachable in this market across all paths.</p>
+                                <h4 class="text-xs font-black uppercase tracking-wider mb-1"
+                                    :class="darkMode ? 'text-white' : 'text-[#00205B]'">All Networks</h4>
+                                <p class="text-xs leading-relaxed" :class="darkMode ? 'text-slate-400' : 'text-slate-600'">The de-duplicated baseline showing every unique ASN reachable in this market across all paths.</p>
                             </div>
                         </div>
                     </div>
                 </div>
 
-                <!-- Export Button -->
+                <!-- PDF Export Button -->
                 <button
-                    @click="exportData"
+                    @click="generatePDF()"
                     :disabled="!scopeId || loading"
                     class="px-4 py-2 rounded-xl text-[10px] font-black uppercase tracking-wider transition-all shadow-sm"
-                    :class="scopeId && !loading ? 'bg-[#00A9E0] text-white hover:bg-[#0090c0] hover:shadow-md' : 'bg-slate-100 text-slate-400 cursor-not-allowed'"
-                    title="Export current view as CSV"
+                    :class="scopeId && !loading ? 'bg-[#00A9E0] text-white hover:bg-[#0090c0] hover:shadow-md' : (darkMode ? 'bg-slate-800 text-slate-600 cursor-not-allowed' : 'bg-slate-100 text-slate-400 cursor-not-allowed')"
+                    title="Generate PDF Report"
                 >
                     <div class="flex items-center gap-2">
                         <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 10v6m0 0l-3-3m3 3l3-3m2 8H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
+                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
                         </svg>
-                        <span>Export CSV</span>
+                        <span>PDF Report</span>
                     </div>
+                </button>
+
+                <!-- Theme Toggle -->
+                <button
+                    @click="toggleTheme()"
+                    class="w-10 h-10 rounded-xl flex items-center justify-center transition-all shadow-sm border"
+                    :class="darkMode
+                        ? 'bg-slate-800 border-slate-700 text-yellow-400 hover:bg-slate-700'
+                        : 'bg-white border-slate-200 text-slate-600 hover:bg-slate-50'"
+                    title="Toggle theme"
+                >
+                    <svg x-show="!darkMode" class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M20.354 15.354A9 9 0 018.646 3.646 9.003 9.003 0 0012 21a9.003 9.003 0 008.354-5.646z" />
+                    </svg>
+                    <svg x-show="darkMode" class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 3v1m0 16v1m9-9h-1M4 12H3m15.364 6.364l-.707-.707M6.343 6.343l-.707-.707m12.728 0l-.707.707M6.343 17.657l-.707.707M16 12a4 4 0 11-8 0 4 4 0 018 0z" />
+                    </svg>
                 </button>
             </div>
         </header>
@@ -240,84 +327,91 @@
         <!-- Loading indicator -->
         <div x-show="loading" class="flex items-center gap-3 py-2">
             <div class="w-5 h-5 border-2 border-[#00205B] border-t-transparent rounded-full animate-spin"></div>
-            <span class="text-sm text-slate-500 font-medium">Scanning networks...</span>
+            <span class="text-sm font-medium" :class="darkMode ? 'text-slate-400' : 'text-slate-500'">Scanning networks...</span>
         </div>
 
         <!-- Neighbor Summary Bar -->
-        <div x-show="summary" x-cloak class="bg-white rounded-2xl border border-slate-200 shadow-sm overflow-hidden">
+        <div x-show="summary" x-cloak class="rounded-2xl border shadow-sm overflow-hidden"
+             :class="darkMode ? 'bg-slate-800 border-slate-700' : 'bg-white border-slate-200'">
             <!-- Clickable stat tiles -->
             <div class="px-6 py-3 flex flex-wrap items-center gap-5">
                 <button @click="tileFilter = tileFilter === 'all' ? '' : 'all'"
                     class="flex items-center gap-2 rounded-xl px-2 py-1 -mx-2 transition-all cursor-pointer"
-                    :class="tileFilter === 'all' ? 'ring-2 ring-[#00205B]/30 bg-slate-50' : 'hover:bg-slate-50'">
+                    :class="tileFilter === 'all'
+                        ? 'ring-2 ring-[#00205B]/30 ' + (darkMode ? 'bg-slate-700' : 'bg-slate-50')
+                        : (darkMode ? 'hover:bg-slate-700' : 'hover:bg-slate-50')">
                     <div class="w-9 h-9 rounded-xl bg-[#00205B] flex items-center justify-center">
                         <svg class="w-4 h-4 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13 10V3L4 14h7v7l9-11h-7z" /></svg>
                     </div>
                     <div class="text-left">
-                        <p class="text-[10px] font-black text-slate-400 uppercase tracking-wider">Total Networks</p>
-                        <p class="text-lg font-black text-[#00205B] leading-tight" :class="isFiltered && 'italic'" x-text="dynamicTotal"></p>
+                        <p class="text-[10px] font-black uppercase tracking-wider" :class="darkMode ? 'text-slate-500' : 'text-slate-400'">Total Networks</p>
+                        <p class="text-lg font-black leading-tight" :class="(darkMode ? 'text-white' : 'text-[#00205B]') + (isFiltered ? ' italic' : '')" x-text="dynamicTotal"></p>
                     </div>
                 </button>
 
-                <div class="w-px h-10 bg-slate-200"></div>
+                <div class="w-px h-10" :class="darkMode ? 'bg-slate-700' : 'bg-slate-200'"></div>
 
                 <button @click="tileFilter = tileFilter === 'green' ? '' : 'green'"
                     class="flex items-center gap-2 rounded-xl px-2 py-1 -mx-2 transition-all cursor-pointer"
-                    :class="tileFilter === 'green' ? 'ring-2 ring-emerald-300 bg-emerald-50' : 'hover:bg-slate-50'">
+                    :class="tileFilter === 'green' ? 'ring-2 ring-emerald-300 bg-emerald-50' : (darkMode ? 'hover:bg-slate-700' : 'hover:bg-slate-50')">
                     <div class="w-9 h-9 rounded-xl bg-emerald-100 flex items-center justify-center">
                         <svg class="w-4 h-4 text-emerald-700" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 3v4M3 5h4M6 17v4m-2-2h4m5-16l2.286 6.857L21 12l-5.714 2.143L13 21l-2.286-6.857L5 12l5.714-2.143L13 3z" /></svg>
                     </div>
                     <div class="text-left">
-                        <p class="text-[10px] font-black text-slate-400 uppercase tracking-wider">Direct On-Net</p>
+                        <p class="text-[10px] font-black uppercase tracking-wider" :class="darkMode ? 'text-slate-500' : 'text-slate-400'">Direct On-Net</p>
                         <p class="text-lg font-black text-emerald-700 leading-tight" :class="isFiltered && 'italic'" x-text="dynamicDirectCount"></p>
                     </div>
                 </button>
 
-                <div class="w-px h-10 bg-slate-200"></div>
+                <div class="w-px h-10" :class="darkMode ? 'bg-slate-700' : 'bg-slate-200'"></div>
 
                 <button @click="tileFilter = tileFilter === 'yellow' ? '' : 'yellow'"
                     class="flex items-center gap-2 rounded-xl px-2 py-1 -mx-2 transition-all cursor-pointer"
-                    :class="tileFilter === 'yellow' ? 'ring-2 ring-amber-300 bg-amber-50' : 'hover:bg-slate-50'">
+                    :class="tileFilter === 'yellow' ? 'ring-2 ring-amber-300 bg-amber-50' : (darkMode ? 'hover:bg-slate-700' : 'hover:bg-slate-50')">
                     <div class="w-9 h-9 rounded-xl bg-amber-100 flex items-center justify-center">
                         <svg class="w-4 h-4 text-amber-700" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M8 7h12m0 0l-4-4m4 4l-4 4m0 6H4m0 0l4 4m-4-4l4-4" /></svg>
                     </div>
                     <div class="text-left">
-                        <p class="text-[10px] font-black text-slate-400 uppercase tracking-wider">Exchange / IXP</p>
+                        <p class="text-[10px] font-black uppercase tracking-wider" :class="darkMode ? 'text-slate-500' : 'text-slate-400'">Exchange / IXP</p>
                         <p class="text-lg font-black text-amber-700 leading-tight" :class="isFiltered && 'italic'" x-text="dynamicIxpCount"></p>
                     </div>
                 </button>
 
-                <div class="w-px h-10 bg-slate-200"></div>
+                <div class="w-px h-10" :class="darkMode ? 'bg-slate-700' : 'bg-slate-200'"></div>
 
-                <button @click="tileFilter = tileFilter === 'red' ? '' : 'red'"
+                <!-- Changed from red to violet/purple -->
+                <button @click="tileFilter = tileFilter === 'transit' ? '' : 'transit'"
                     class="flex items-center gap-2 rounded-xl px-2 py-1 -mx-2 transition-all cursor-pointer"
-                    :class="tileFilter === 'red' ? 'ring-2 ring-red-300 bg-red-50' : 'hover:bg-slate-50'">
-                    <div class="w-9 h-9 rounded-xl bg-red-100 flex items-center justify-center">
-                        <svg class="w-4 h-4 text-red-600" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 11H5m14 0a2 2 0 012 2v6a2 2 0 01-2 2H5a2 2 0 01-2-2v-6a2 2 0 012-2m14 0V9a2 2 0 00-2-2M5 11V9a2 2 0 012-2m0 0V5a2 2 0 012-2h6a2 2 0 012 2v2M7 7h10" /></svg>
+                    :class="tileFilter === 'transit' ? 'ring-2 ring-violet-300 bg-violet-50' : (darkMode ? 'hover:bg-slate-700' : 'hover:bg-slate-50')">
+                    <div class="w-9 h-9 rounded-xl bg-violet-100 flex items-center justify-center">
+                        <svg class="w-4 h-4 text-violet-600" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 11H5m14 0a2 2 0 012 2v6a2 2 0 01-2 2H5a2 2 0 01-2-2v-6a2 2 0 012-2m14 0V9a2 2 0 00-2-2M5 11V9a2 2 0 012-2m0 0V5a2 2 0 012-2h6a2 2 0 012 2v2M7 7h10" /></svg>
                     </div>
                     <div class="text-left">
-                        <p class="text-[10px] font-black text-slate-400 uppercase tracking-wider">Upstream Transit</p>
-                        <p class="text-lg font-black text-red-600 leading-tight" :class="isFiltered && 'italic'" x-text="dynamicTransitCount"></p>
+                        <p class="text-[10px] font-black uppercase tracking-wider" :class="darkMode ? 'text-slate-500' : 'text-slate-400'">Upstream Transit</p>
+                        <p class="text-lg font-black text-violet-600 leading-tight" :class="isFiltered && 'italic'" x-text="dynamicTransitCount"></p>
                     </div>
                 </button>
             </div>
 
             <!-- Filter indicator -->
-            <div x-show="isFiltered && networks.length" class="px-6 pb-1 -mt-1 border-t border-slate-100 pt-2">
-                <span class="text-[10px] italic text-slate-400">Showing filtered results for <span x-text="viewModeLabel" class="font-semibold not-italic"></span></span>
+            <div x-show="isFiltered && networks.length" class="px-6 pb-1 -mt-1 pt-2"
+                 :class="darkMode ? 'border-t border-slate-700' : 'border-t border-slate-100'">
+                <span class="text-[10px] italic" :class="darkMode ? 'text-slate-500' : 'text-slate-400'">Showing filtered results for <span x-text="viewModeLabel" class="font-semibold not-italic"></span></span>
             </div>
 
             <!-- Filtered network badge grid -->
-            <div x-show="tileFilter && tileFilter !== 'yellow'" x-transition class="border-t border-slate-100 px-6 py-4">
+            <div x-show="tileFilter && tileFilter !== 'yellow'" x-transition class="px-6 py-4"
+                 :class="darkMode ? 'border-t border-slate-700' : 'border-t border-slate-100'">
                 <div class="flex items-center justify-between mb-3">
                     <div class="flex items-center gap-3">
-                        <p class="text-[10px] font-black text-slate-400 uppercase tracking-wider" x-text="tileFilterLabel"></p>
-                        <span class="text-[10px] font-bold text-slate-300" x-text="filteredBadgeNetworks.length + ' networks'"></span>
+                        <p class="text-[10px] font-black uppercase tracking-wider" :class="darkMode ? 'text-slate-500' : 'text-slate-400'" x-text="tileFilterLabel"></p>
+                        <span class="text-[10px] font-bold" :class="darkMode ? 'text-slate-600' : 'text-slate-300'" x-text="filteredBadgeNetworks.length + ' networks'"></span>
                     </div>
                     <div class="relative w-64">
                         <input type="text" x-model="searchQuery" placeholder="Search ASN or Provider..."
-                            class="w-full pl-8 pr-3 py-1.5 bg-slate-50 border border-slate-200 rounded-lg text-xs focus:ring-2 focus:ring-[#00A9E0]/20 focus:border-[#00A9E0] outline-none">
-                        <svg class="w-3.5 h-3.5 absolute left-2.5 top-1/2 -translate-y-1/2 text-slate-300" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z"/></svg>
+                            class="w-full pl-8 pr-3 py-1.5 border rounded-lg text-xs focus:ring-2 focus:ring-[#00A9E0]/20 focus:border-[#00A9E0] outline-none"
+                            :class="darkMode ? 'bg-slate-700 border-slate-600 text-white placeholder-slate-500' : 'bg-slate-50 border-slate-200'">
+                        <svg class="w-3.5 h-3.5 absolute left-2.5 top-1/2 -translate-y-1/2" :class="darkMode ? 'text-slate-500' : 'text-slate-300'" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z"/></svg>
                     </div>
                 </div>
                 <div class="grid grid-cols-3 gap-2">
@@ -331,15 +425,17 @@
                         </a>
                     </template>
                 </div>
-                <div x-show="filteredBadgeNetworks.length === 0" class="text-center py-6 text-slate-400 text-xs italic">No networks match your search.</div>
+                <div x-show="filteredBadgeNetworks.length === 0" class="text-center py-6 text-xs italic"
+                     :class="darkMode ? 'text-slate-500' : 'text-slate-400'">No networks match your search.</div>
             </div>
 
             <!-- IXP list (shown when yellow tile is clicked) -->
-            <div x-show="tileFilter === 'yellow'" x-transition class="border-t border-slate-100 px-6 py-4">
+            <div x-show="tileFilter === 'yellow'" x-transition class="px-6 py-4"
+                 :class="darkMode ? 'border-t border-slate-700' : 'border-t border-slate-100'">
                 <div class="flex items-center justify-between mb-3">
                     <div class="flex items-center gap-3">
-                        <p class="text-[10px] font-black text-slate-400 uppercase tracking-wider">Internet Exchanges at this Location</p>
-                        <span class="text-[10px] font-bold text-slate-300" x-text="localIxes.length + ' exchanges'"></span>
+                        <p class="text-[10px] font-black uppercase tracking-wider" :class="darkMode ? 'text-slate-500' : 'text-slate-400'">Internet Exchanges at this Location</p>
+                        <span class="text-[10px] font-bold" :class="darkMode ? 'text-slate-600' : 'text-slate-300'" x-text="localIxes.length + ' exchanges'"></span>
                     </div>
                 </div>
                 <div class="grid grid-cols-2 gap-3">
@@ -356,22 +452,25 @@
                         </a>
                     </template>
                 </div>
-                <div x-show="localIxes.length === 0" class="text-center py-6 text-slate-400 text-xs italic">No internet exchanges found at this location.</div>
+                <div x-show="localIxes.length === 0" class="text-center py-6 text-xs italic"
+                     :class="darkMode ? 'text-slate-500' : 'text-slate-400'">No internet exchanges found at this location.</div>
             </div>
         </div>
 
         <!-- Empty State -->
         <div x-show="!scopeId && !loading" class="flex-1 flex items-center justify-center py-20">
             <div class="max-w-sm text-center">
-                <div class="w-16 h-16 bg-slate-100 rounded-3xl flex items-center justify-center mx-auto mb-6">
-                    <svg class="w-8 h-8 text-slate-400" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z" /></svg>
+                <div class="w-16 h-16 rounded-3xl flex items-center justify-center mx-auto mb-6"
+                     :class="darkMode ? 'bg-slate-800' : 'bg-slate-100'">
+                    <svg class="w-8 h-8" :class="darkMode ? 'text-slate-600' : 'text-slate-400'" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z" /></svg>
                 </div>
-                <h3 class="text-xl font-black text-slate-700">Scope Pending</h3>
-                <p class="text-sm text-slate-400 mt-2 font-medium">Select a global market or individual data center facility from the sidebar to begin auditing.</p>
+                <h3 class="text-xl font-black" :class="darkMode ? 'text-slate-300' : 'text-slate-700'">Scope Pending</h3>
+                <p class="text-sm mt-2 font-medium" :class="darkMode ? 'text-slate-500' : 'text-slate-400'">Select a global market or individual data center facility from the sidebar to begin auditing.</p>
             </div>
         </div>
 
-        <footer class="flex-shrink-0 flex justify-between items-center text-[10px] font-black text-slate-400 uppercase tracking-[0.3em] py-2 mt-auto">
+        <footer class="flex-shrink-0 flex justify-between items-center text-[10px] font-black uppercase tracking-[0.3em] py-2 mt-auto"
+                :class="darkMode ? 'text-slate-600' : 'text-slate-400'">
             <p>Source: PeeringDB API</p>
             <p>&copy; Zenlayer Global Operations</p>
         </footer>
@@ -380,7 +479,7 @@
     <script>
         function auditDashboard() {
             const initialFacilities = {{ facilities|tojson|safe }};
-            
+
             return {
                 allFacilities: initialFacilities,
                 selectedCity: '',
@@ -394,6 +493,24 @@
                 summary: null,
                 localIxes: [],
                 tileFilter: '',
+                darkMode: localStorage.getItem('darkMode') === 'true',
+
+                init() {
+                    // Apply saved theme on load
+                    if (this.darkMode) {
+                        document.documentElement.classList.add('dark');
+                    }
+                },
+
+                toggleTheme() {
+                    this.darkMode = !this.darkMode;
+                    localStorage.setItem('darkMode', this.darkMode);
+                    if (this.darkMode) {
+                        document.documentElement.classList.add('dark');
+                    } else {
+                        document.documentElement.classList.remove('dark');
+                    }
+                },
 
                 get filteredFacilities() {
                     if (!this.selectedCity) return [];
@@ -412,13 +529,14 @@
                 getHealth(net) {
                     const directAsns = this.summary?.direct_peer_asns || [];
                     if (directAsns.includes(net.asn)) return 'green';
-                    return 'red';
+                    return 'transit'; // Changed from 'red' to 'transit'
                 },
 
                 get filteredBadgeNetworks() {
                     let nets = this.networks;
                     if (this.tileFilter && this.tileFilter !== 'all') {
-                        nets = nets.filter(n => this.getHealth(n) === this.tileFilter);
+                        const filterKey = this.tileFilter === 'transit' ? 'transit' : this.tileFilter;
+                        nets = nets.filter(n => this.getHealth(n) === filterKey);
                     }
                     if (this.searchQuery) {
                         const q = this.searchQuery.toLowerCase();
@@ -431,7 +549,7 @@
                 },
 
                 get tileFilterLabel() {
-                    const labels = { all: 'All Networks', green: 'Direct On-Net Networks', yellow: 'Exchange / IXP Networks', red: 'Upstream Transit Networks' };
+                    const labels = { all: 'All Networks', green: 'Direct On-Net Networks', yellow: 'Exchange / IXP Networks', transit: 'Upstream Transit Networks' };
                     return labels[this.tileFilter] || '';
                 },
 
@@ -439,20 +557,20 @@
                     const h = this.getHealth(net);
                     if (h === 'green') return 'bg-emerald-50 border-emerald-200 text-emerald-800';
                     if (h === 'yellow') return 'bg-amber-50 border-amber-200 text-amber-800';
-                    return 'bg-red-50 border-red-200 text-red-800';
+                    return 'bg-violet-50 border-violet-200 text-violet-800'; // Changed from red to violet
                 },
 
                 dotClass(net) {
                     const h = this.getHealth(net);
                     if (h === 'green') return 'bg-emerald-400';
                     if (h === 'yellow') return 'bg-amber-400';
-                    return 'bg-red-400';
+                    return 'bg-violet-400'; // Changed from red to violet
                 },
 
                 get dynamicTotal() { return this.networks.length; },
                 get dynamicDirectCount() { return this.networks.filter(n => this.getHealth(n) === 'green').length; },
                 get dynamicIxpCount() { return this.summary?.exchange_ixp_count || 0; },
-                get dynamicTransitCount() { return this.networks.filter(n => this.getHealth(n) === 'red').length; },
+                get dynamicTransitCount() { return this.networks.filter(n => this.getHealth(n) === 'transit').length; },
                 get isFiltered() { return this.viewMode !== 'all'; },
 
                 get viewModeLabel() {
@@ -537,19 +655,222 @@
                     }
                 },
 
-                exportData() {
+                generatePDF() {
                     if (!this.scopeId) return;
 
-                    // Build export URL with current filters
-                    let url = `/audit/api/export?category=${this.viewMode}`;
-                    if (this.isMarketScope) {
-                        url += `&location=${encodeURIComponent(this.selectedCity)}`;
-                    } else {
-                        url += `&fac_id=${this.selectedFacId}`;
+                    const { jsPDF } = window.jspdf;
+                    const doc = new jsPDF();
+
+                    // Colors
+                    const brandBlue = [0, 32, 91];     // #00205B
+                    const accentBlue = [0, 169, 224]; // #00A9E0
+                    const emerald = [16, 185, 129];
+                    const amber = [245, 158, 11];
+                    const violet = [139, 92, 246];
+                    const gray = [100, 116, 139];
+
+                    // Header
+                    doc.setFillColor(...brandBlue);
+                    doc.rect(0, 0, 210, 40, 'F');
+
+                    doc.setTextColor(255, 255, 255);
+                    doc.setFontSize(24);
+                    doc.setFont('helvetica', 'bold');
+                    doc.text('ZENLAYER', 20, 22);
+
+                    doc.setFontSize(10);
+                    doc.setFont('helvetica', 'normal');
+                    doc.text('BGP NETWORK CONNECTIVITY REPORT', 20, 32);
+
+                    // Report metadata
+                    doc.setTextColor(...gray);
+                    doc.setFontSize(9);
+                    const dateStr = new Date().toLocaleDateString('en-US', {
+                        year: 'numeric', month: 'long', day: 'numeric'
+                    });
+                    doc.text(`Generated: ${dateStr}`, 190, 22, { align: 'right' });
+
+                    // Market Title
+                    doc.setTextColor(...brandBlue);
+                    doc.setFontSize(18);
+                    doc.setFont('helvetica', 'bold');
+                    doc.text(this.displayTitle, 20, 55);
+
+                    // View mode subtitle
+                    doc.setTextColor(...accentBlue);
+                    doc.setFontSize(10);
+                    doc.setFont('helvetica', 'normal');
+                    doc.text(`Filter: ${this.viewModeLabel}`, 20, 63);
+
+                    // Summary Stats Box
+                    let yPos = 75;
+                    doc.setFillColor(248, 250, 252);
+                    doc.roundedRect(20, yPos, 170, 30, 3, 3, 'F');
+
+                    // Stats
+                    const stats = [
+                        { label: 'Total Networks', value: this.dynamicTotal, color: brandBlue },
+                        { label: 'Direct On-Net', value: this.dynamicDirectCount, color: emerald },
+                        { label: 'IXP Exchanges', value: this.dynamicIxpCount, color: amber },
+                        { label: 'Upstream Transit', value: this.dynamicTransitCount, color: violet }
+                    ];
+
+                    let xPos = 30;
+                    stats.forEach((stat, i) => {
+                        doc.setTextColor(...stat.color);
+                        doc.setFontSize(18);
+                        doc.setFont('helvetica', 'bold');
+                        doc.text(String(stat.value), xPos, yPos + 15);
+
+                        doc.setTextColor(...gray);
+                        doc.setFontSize(7);
+                        doc.setFont('helvetica', 'normal');
+                        doc.text(stat.label.toUpperCase(), xPos, yPos + 22);
+
+                        xPos += 42;
+                    });
+
+                    yPos = 115;
+
+                    // Direct On-Net Networks Section
+                    const directNets = this.networks.filter(n => this.getHealth(n) === 'green');
+                    if (directNets.length > 0) {
+                        doc.setFillColor(...emerald);
+                        doc.rect(20, yPos, 3, 10, 'F');
+                        doc.setTextColor(...brandBlue);
+                        doc.setFontSize(12);
+                        doc.setFont('helvetica', 'bold');
+                        doc.text('Direct On-Net Networks', 28, yPos + 7);
+                        doc.setTextColor(...gray);
+                        doc.setFontSize(8);
+                        doc.text(`${directNets.length} networks with direct BGP peering`, 28, yPos + 14);
+
+                        yPos += 22;
+                        doc.setFontSize(8);
+                        doc.setFont('helvetica', 'normal');
+
+                        directNets.slice(0, 20).forEach((net, i) => {
+                            if (yPos > 270) {
+                                doc.addPage();
+                                yPos = 20;
+                            }
+                            doc.setTextColor(...emerald);
+                            doc.circle(24, yPos - 1.5, 1.5, 'F');
+                            doc.setTextColor(0, 0, 0);
+                            doc.text(`${net.name}`, 30, yPos);
+                            doc.setTextColor(...gray);
+                            doc.text(`AS${net.asn}`, 150, yPos);
+                            yPos += 6;
+                        });
+
+                        if (directNets.length > 20) {
+                            doc.setTextColor(...gray);
+                            doc.setFontSize(7);
+                            doc.text(`... and ${directNets.length - 20} more networks`, 30, yPos);
+                            yPos += 8;
+                        }
+
+                        yPos += 10;
                     }
 
-                    // Trigger download
-                    window.location.href = url;
+                    // IXP Section
+                    if (this.localIxes.length > 0) {
+                        if (yPos > 240) {
+                            doc.addPage();
+                            yPos = 20;
+                        }
+
+                        doc.setFillColor(...amber);
+                        doc.rect(20, yPos, 3, 10, 'F');
+                        doc.setTextColor(...brandBlue);
+                        doc.setFontSize(12);
+                        doc.setFont('helvetica', 'bold');
+                        doc.text('Internet Exchanges (IXP)', 28, yPos + 7);
+                        doc.setTextColor(...gray);
+                        doc.setFontSize(8);
+                        doc.text(`${this.localIxes.length} exchange points available`, 28, yPos + 14);
+
+                        yPos += 22;
+
+                        this.localIxes.forEach((ix, i) => {
+                            if (yPos > 270) {
+                                doc.addPage();
+                                yPos = 20;
+                            }
+                            doc.setTextColor(...amber);
+                            doc.circle(24, yPos - 1.5, 1.5, 'F');
+                            doc.setTextColor(0, 0, 0);
+                            doc.setFontSize(8);
+                            doc.text(ix.name, 30, yPos);
+                            if (ix.name_long) {
+                                doc.setTextColor(...gray);
+                                doc.setFontSize(7);
+                                doc.text(ix.name_long.substring(0, 60), 30, yPos + 4);
+                                yPos += 4;
+                            }
+                            yPos += 6;
+                        });
+
+                        yPos += 10;
+                    }
+
+                    // Transit Section
+                    const transitNets = this.networks.filter(n => this.getHealth(n) === 'transit');
+                    if (transitNets.length > 0) {
+                        if (yPos > 240) {
+                            doc.addPage();
+                            yPos = 20;
+                        }
+
+                        doc.setFillColor(...violet);
+                        doc.rect(20, yPos, 3, 10, 'F');
+                        doc.setTextColor(...brandBlue);
+                        doc.setFontSize(12);
+                        doc.setFont('helvetica', 'bold');
+                        doc.text('Upstream Transit Providers', 28, yPos + 7);
+                        doc.setTextColor(...gray);
+                        doc.setFontSize(8);
+                        doc.text(`${transitNets.length} networks reachable via transit`, 28, yPos + 14);
+
+                        yPos += 22;
+
+                        transitNets.slice(0, 20).forEach((net, i) => {
+                            if (yPos > 270) {
+                                doc.addPage();
+                                yPos = 20;
+                            }
+                            doc.setTextColor(...violet);
+                            doc.circle(24, yPos - 1.5, 1.5, 'F');
+                            doc.setTextColor(0, 0, 0);
+                            doc.setFontSize(8);
+                            doc.text(`${net.name}`, 30, yPos);
+                            doc.setTextColor(...gray);
+                            doc.text(`AS${net.asn}`, 150, yPos);
+                            yPos += 6;
+                        });
+
+                        if (transitNets.length > 20) {
+                            doc.setTextColor(...gray);
+                            doc.setFontSize(7);
+                            doc.text(`... and ${transitNets.length - 20} more networks`, 30, yPos);
+                        }
+                    }
+
+                    // Footer on last page
+                    const pageCount = doc.internal.getNumberOfPages();
+                    for (let i = 1; i <= pageCount; i++) {
+                        doc.setPage(i);
+                        doc.setFillColor(248, 250, 252);
+                        doc.rect(0, 282, 210, 15, 'F');
+                        doc.setTextColor(...gray);
+                        doc.setFontSize(7);
+                        doc.text('Source: PeeringDB API | Zenlayer Global Operations', 20, 290);
+                        doc.text(`Page ${i} of ${pageCount}`, 190, 290, { align: 'right' });
+                    }
+
+                    // Generate filename
+                    const filename = `Zenlayer_BGP_Report_${this.selectedCity || 'Facility'}_${new Date().toISOString().split('T')[0]}.pdf`;
+                    doc.save(filename);
                 }
             };
         }
