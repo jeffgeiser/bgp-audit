@@ -1,6 +1,7 @@
 version: '3.8'
 
 services:
+  # Existing BGP Audit app
   bgp-audit:
     build: .
     container_name: bgp_audit_app
@@ -10,4 +11,46 @@ services:
       - ./data:/app/data
     environment:
       - DATA_DIR=/app/data
+    restart: unless-stopped
+
+  # IKM: Employee Chat Interface (Chainlit)
+  ikm-chat:
+    build:
+      context: ./ikm
+      dockerfile: chat/Dockerfile
+    container_name: ikm_chat
+    ports:
+      - "8100:8000"
+    volumes:
+      - ./data/ikm:/app/data
+    env_file:
+      - ./ikm/.env
+    environment:
+      - IKM_DATA_DIR=/app/data
+    depends_on:
+      - crawl4ai
+    restart: unless-stopped
+
+  # IKM: Auditor Dashboard (Streamlit)
+  ikm-auditor:
+    build:
+      context: ./ikm
+      dockerfile: auditor/Dockerfile
+    container_name: ikm_auditor
+    ports:
+      - "8501:8501"
+    volumes:
+      - ./data/ikm:/app/data
+    env_file:
+      - ./ikm/.env
+    environment:
+      - IKM_DATA_DIR=/app/data
+    restart: unless-stopped
+
+  # IKM: Web Crawler Service
+  crawl4ai:
+    image: unclecode/crawl4ai:latest
+    container_name: ikm_crawl4ai
+    ports:
+      - "11235:11235"
     restart: unless-stopped
