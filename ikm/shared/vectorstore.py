@@ -10,6 +10,7 @@ def get_client() -> chromadb.PersistentClient:
 
 
 def get_collection(client: chromadb.PersistentClient = None):
+    """Get the knowledge collection. Uses ChromaDB's built-in embedding model."""
     if client is None:
         client = get_client()
     return client.get_or_create_collection(
@@ -21,15 +22,14 @@ def get_collection(client: chromadb.PersistentClient = None):
 def upsert_chunk(
     chunk_id: str,
     text: str,
-    embedding: list[float],
     source: str,
     auditor: str,
     department: str,
 ):
+    """Add/update a chunk. ChromaDB handles embedding automatically."""
     collection = get_collection()
     collection.upsert(
         ids=[chunk_id],
-        embeddings=[embedding],
         documents=[text],
         metadatas=[
             {
@@ -43,14 +43,15 @@ def upsert_chunk(
 
 
 def query_knowledge(
-    query_embedding: list[float],
+    query_text: str,
     department: str = None,
     n_results: int = 5,
 ) -> dict:
+    """Query by text. ChromaDB handles embedding the query automatically."""
     collection = get_collection()
     where = {"department": department} if department else None
     return collection.query(
-        query_embeddings=[query_embedding],
+        query_texts=[query_text],
         n_results=n_results,
         where=where,
         include=["documents", "metadatas", "distances"],

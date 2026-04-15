@@ -1,0 +1,242 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Zenlayer | IKM Auditor</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script defer src="https://cdn.jsdelivr.net/npm/alpinejs@3.x.x/dist/cdn.min.js"></script>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap" rel="stylesheet">
+    <style>
+        [x-cloak] { display: none !important; }
+        body { font-family: 'Inter', sans-serif; }
+    </style>
+</head>
+<body class="bg-slate-50 min-h-screen" x-data="auditorApp()">
+
+    <!-- Header -->
+    <header class="bg-[#00205B] text-white shadow-lg sticky top-0 z-50">
+        <div class="max-w-6xl mx-auto px-6 py-4 flex items-center justify-between">
+            <div class="flex items-center gap-3">
+                <div class="w-9 h-9 rounded-xl bg-amber-500 flex items-center justify-center">
+                    <svg class="w-5 h-5 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z" />
+                    </svg>
+                </div>
+                <div>
+                    <h1 class="text-lg font-bold tracking-tight">Knowledge Auditor</h1>
+                    <p class="text-[10px] text-white/50 uppercase tracking-widest">Review &amp; Approve Knowledge Chunks</p>
+                </div>
+            </div>
+            <div class="flex items-center gap-2">
+                <a href="/audit/ikm" class="px-3 py-1.5 rounded-lg text-xs font-bold bg-white/10 hover:bg-white/20 transition-all border border-white/10">Chat</a>
+                <a href="/audit/" class="px-3 py-1.5 rounded-lg text-xs font-bold bg-white/10 hover:bg-white/20 transition-all border border-white/10">BGP Audit</a>
+            </div>
+        </div>
+    </header>
+
+    <main class="max-w-6xl mx-auto px-6 py-6">
+        <!-- Top bar: filters + auditor name -->
+        <div class="bg-white rounded-xl border border-slate-200 shadow-sm p-4 mb-6 flex flex-wrap items-center gap-4">
+            <div class="flex items-center gap-2">
+                <label class="text-xs font-bold text-slate-500 uppercase tracking-wider">Your Name</label>
+                <input x-model="auditorName" type="text" placeholder="Jane Doe"
+                    class="px-3 py-1.5 border border-slate-200 rounded-lg text-sm w-40 focus:ring-2 focus:ring-[#00A9E0] outline-none">
+            </div>
+            <div class="flex items-center gap-2">
+                <label class="text-xs font-bold text-slate-500 uppercase tracking-wider">Status</label>
+                <select x-model="filterStatus" @change="loadChunks()"
+                    class="px-3 py-1.5 border border-slate-200 rounded-lg text-sm focus:ring-2 focus:ring-[#00A9E0] outline-none">
+                    <option value="Pending">Pending</option>
+                    <option value="Approved">Approved</option>
+                    <option value="Rejected">Rejected</option>
+                    <option value="">All</option>
+                </select>
+            </div>
+            <div class="flex items-center gap-2">
+                <label class="text-xs font-bold text-slate-500 uppercase tracking-wider">Department</label>
+                <select x-model="filterDept" @change="loadChunks()"
+                    class="px-3 py-1.5 border border-slate-200 rounded-lg text-sm focus:ring-2 focus:ring-[#00A9E0] outline-none">
+                    <option value="">All</option>
+                    {% for dept in departments %}
+                    <option value="{{ dept }}">{{ dept }}</option>
+                    {% endfor %}
+                </select>
+            </div>
+            <div class="ml-auto flex items-center gap-4 text-xs">
+                <div class="flex items-center gap-1.5">
+                    <span class="w-2 h-2 rounded-full bg-amber-500"></span>
+                    <span class="font-bold text-slate-500">Pending: <span x-text="stats.staging?.Pending || 0"></span></span>
+                </div>
+                <div class="flex items-center gap-1.5">
+                    <span class="w-2 h-2 rounded-full bg-emerald-500"></span>
+                    <span class="font-bold text-slate-500">Approved: <span x-text="stats.staging?.Approved || 0"></span></span>
+                </div>
+                <div class="flex items-center gap-1.5">
+                    <span class="w-2 h-2 rounded-full bg-violet-500"></span>
+                    <span class="font-bold text-slate-500">In Vector DB: <span x-text="stats.vector_count || 0"></span></span>
+                </div>
+            </div>
+        </div>
+
+        <!-- Loading -->
+        <div x-show="loading" class="text-center py-12 text-slate-400 text-sm">Loading chunks...</div>
+
+        <!-- Empty state -->
+        <div x-show="!loading && chunks.length === 0" class="text-center py-12 text-slate-400 text-sm">
+            No chunks match the current filters.
+        </div>
+
+        <!-- Chunk cards -->
+        <div class="space-y-4">
+            <template x-for="chunk in chunks" :key="chunk.id">
+                <div class="bg-white rounded-xl border shadow-sm overflow-hidden"
+                     :class="chunk.status === 'Pending' ? 'border-amber-200' : chunk.status === 'Approved' ? 'border-emerald-200' : 'border-slate-200'">
+                    <!-- Chunk header -->
+                    <div class="px-5 py-3 flex items-center justify-between border-b"
+                         :class="chunk.status === 'Pending' ? 'bg-amber-50 border-amber-100' : chunk.status === 'Approved' ? 'bg-emerald-50 border-emerald-100' : 'bg-slate-50 border-slate-100'">
+                        <div class="flex items-center gap-3">
+                            <span class="w-2 h-2 rounded-full"
+                                  :class="chunk.status === 'Pending' ? 'bg-amber-500' : chunk.status === 'Approved' ? 'bg-emerald-500' : 'bg-red-400'"></span>
+                            <span class="text-xs font-bold text-slate-500" x-text="'#' + chunk.id"></span>
+                            <span class="text-xs text-slate-400" x-text="chunk.source"></span>
+                            <span class="text-[10px] font-bold uppercase tracking-wider px-2 py-0.5 rounded-full"
+                                  :class="chunk.status === 'Pending' ? 'bg-amber-100 text-amber-700' : chunk.status === 'Approved' ? 'bg-emerald-100 text-emerald-700' : 'bg-red-100 text-red-700'"
+                                  x-text="chunk.status"></span>
+                        </div>
+                        <div class="flex items-center gap-2 text-xs text-slate-400">
+                            <span x-show="chunk.auditor" x-text="'Audited by ' + chunk.auditor"></span>
+                            <span x-text="chunk.updated_at?.slice(0, 10)"></span>
+                        </div>
+                    </div>
+
+                    <!-- Chunk body -->
+                    <div class="p-5">
+                        <div class="flex gap-4">
+                            <div class="flex-1">
+                                <textarea
+                                    x-model="chunk._editContent"
+                                    class="w-full border border-slate-200 rounded-lg p-3 text-sm font-mono resize-y min-h-[120px] focus:ring-2 focus:ring-[#00A9E0] outline-none"
+                                    x-init="chunk._editContent = chunk.content; chunk._editDept = chunk.department; chunk._notes = chunk.auditor_notes || ''"
+                                ></textarea>
+                                <input type="text" x-model="chunk._notes" placeholder="Auditor notes (optional)"
+                                    class="w-full mt-2 px-3 py-1.5 border border-slate-200 rounded-lg text-xs focus:ring-2 focus:ring-[#00A9E0] outline-none">
+                            </div>
+                            <div class="w-48 flex flex-col gap-2">
+                                <select x-model="chunk._editDept"
+                                    class="px-3 py-1.5 border border-slate-200 rounded-lg text-xs focus:ring-2 focus:ring-[#00A9E0] outline-none">
+                                    {% for dept in departments %}
+                                    <option value="{{ dept }}">{{ dept }}</option>
+                                    {% endfor %}
+                                </select>
+
+                                <template x-if="chunk.status === 'Pending'">
+                                    <div class="space-y-2">
+                                        <button @click="approveChunk(chunk)"
+                                            :disabled="!auditorName"
+                                            class="w-full py-2 rounded-lg text-xs font-bold bg-emerald-500 text-white hover:bg-emerald-600 disabled:opacity-40 transition-all">
+                                            Approve
+                                        </button>
+                                        <button @click="rejectChunk(chunk)"
+                                            class="w-full py-2 rounded-lg text-xs font-bold bg-slate-200 text-slate-600 hover:bg-slate-300 transition-all">
+                                            Reject
+                                        </button>
+                                    </div>
+                                </template>
+                                <template x-if="chunk.status !== 'Pending'">
+                                    <button @click="saveChunk(chunk)"
+                                        class="w-full py-2 rounded-lg text-xs font-bold bg-[#00A9E0] text-white hover:bg-[#0090c0] transition-all">
+                                        Save Edits
+                                    </button>
+                                </template>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </template>
+        </div>
+    </main>
+
+    <script>
+        function auditorApp() {
+            return {
+                chunks: [],
+                stats: {},
+                loading: false,
+                auditorName: localStorage.getItem('ikm_auditor_name') || '',
+                filterStatus: 'Pending',
+                filterDept: '',
+
+                init() {
+                    this.$watch('auditorName', (v) => localStorage.setItem('ikm_auditor_name', v));
+                    this.loadChunks();
+                    this.loadStats();
+                },
+
+                async loadChunks() {
+                    this.loading = true;
+                    const params = new URLSearchParams();
+                    if (this.filterStatus) params.set('status', this.filterStatus);
+                    if (this.filterDept) params.set('department', this.filterDept);
+                    try {
+                        const resp = await fetch(`/audit/api/ikm/chunks?${params}`);
+                        this.chunks = await resp.json();
+                    } catch (e) { console.error(e); }
+                    this.loading = false;
+                },
+
+                async loadStats() {
+                    try {
+                        const resp = await fetch('/audit/api/ikm/stats');
+                        this.stats = await resp.json();
+                    } catch (e) {}
+                },
+
+                async approveChunk(chunk) {
+                    if (!this.auditorName) return alert('Enter your name first');
+                    await fetch(`/audit/api/ikm/chunks/${chunk.id}/approve`, {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({
+                            content: chunk._editContent,
+                            department: chunk._editDept,
+                            auditor: this.auditorName,
+                            auditor_notes: chunk._notes,
+                        }),
+                    });
+                    this.loadChunks();
+                    this.loadStats();
+                },
+
+                async rejectChunk(chunk) {
+                    await fetch(`/audit/api/ikm/chunks/${chunk.id}/reject`, {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({
+                            auditor: this.auditorName || 'Unknown',
+                            auditor_notes: chunk._notes,
+                        }),
+                    });
+                    this.loadChunks();
+                    this.loadStats();
+                },
+
+                async saveChunk(chunk) {
+                    await fetch(`/audit/api/ikm/chunks/${chunk.id}`, {
+                        method: 'PUT',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({
+                            content: chunk._editContent,
+                            department: chunk._editDept,
+                            auditor_notes: chunk._notes,
+                            auditor: this.auditorName || undefined,
+                        }),
+                    });
+                    this.loadChunks();
+                    this.loadStats();
+                },
+            };
+        }
+    </script>
+</body>
+</html>
