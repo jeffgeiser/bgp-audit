@@ -960,3 +960,11 @@ async def export_networks(
     except Exception as e:
         print(f"[API] Export error: {e}")
         raise HTTPException(status_code=500, detail=str(e))
+
+# --- IKM (Internal Knowledge MCP) ---
+try:
+    from ikm.router import router as ikm_router
+    app.include_router(ikm_router)
+    print("[IKM] Router loaded successfully")
+except ImportError as e:
+    print(f"[IKM] Router not loaded (missing dependency): {e}")
