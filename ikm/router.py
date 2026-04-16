@@ -2,9 +2,9 @@
 FastAPI router for Zenlayer IKM.
 
 Provides:
-- /ikm           → Chat interface
-- /ikm/auditor   → Auditor dashboard
-- /api/ikm/*     → API endpoints for chat and auditor actions
+- /           → Chat interface (served by main.py root route)
+- /dash       → Auditor dashboard with persona system
+- /api/ikm/*  → API endpoints for chat and auditor actions
 """
 
 import os
@@ -15,18 +15,19 @@ from fastapi import APIRouter, Request, HTTPException
 from fastapi.responses import HTMLResponse, StreamingResponse
 from pydantic import BaseModel
 
-# Ensure shared modules are importable
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
 from shared import config
 from shared.db import init_db, get_chunks, get_chunk, update_chunk, insert_chunk, get_stats
 from shared.vectorstore import upsert_chunk, query_knowledge, get_collection_count
 from shared.gaps import log_gap
+from shared.personas import init_personas_db, get_personas, get_persona, create_persona, update_persona, delete_persona
 
 router = APIRouter()
 
-# Init staging DB on import
+# Init databases on import
 init_db()
+init_personas_db()
 
 
 # --- Pydantic models ---
@@ -54,17 +55,22 @@ class IngestRequest(BaseModel):
     department: str = "General"
 
 
+class PersonaCreate(BaseModel):
+    name: str
+    role: str
+    departments: list[str]
+
+
+class PersonaUpdate(BaseModel):
+    name: Optional[str] = None
+    role: Optional[str] = None
+    departments: Optional[list[str]] = None
+
+
 # --- Page routes ---
 
-@router.get("/ikm", response_class=HTMLResponse)
-async def ikm_chat_page(request: Request):
-    from fastapi.templating import Jinja2Templates
-    templates = Jinja2Templates(directory="templates")
-    return templates.TemplateResponse("ikm_chat.html", {"request": request})
-
-
-@router.get("/ikm/auditor", response_class=HTMLResponse)
-async def ikm_auditor_page(request: Request):
+@router.get("/dash", response_class=HTMLResponse)
+async def dashboard_page(request: Request):
     from fastapi.templating import Jinja2Templates
     templates = Jinja2Templates(directory="templates")
     return templates.TemplateResponse("ikm_auditor.html", {
@@ -86,7 +92,6 @@ async def ikm_chat(req: ChatRequest):
         n_results=5,
     )
 
-    # Build context from results
     documents = results.get("documents", [[]])[0]
     metadatas = results.get("metadatas", [[]])[0]
     distances = results.get("distances", [[]])[0]
@@ -107,7 +112,6 @@ async def ikm_chat(req: ChatRequest):
             "similarity": round(similarity, 3),
         })
 
-    # Log gap if no good results
     if not sources:
         best_score = 0.0
         if distances:
@@ -121,7 +125,6 @@ async def ikm_chat(req: ChatRequest):
 
     context = "\n\n---\n\n".join(context_parts)
 
-    # Call Qwen for the answer
     async with httpx.AsyncClient(timeout=60.0) as client:
         resp = await client.post(
             f"{config.QWEN_API_BASE}/chat/completions",
@@ -250,14 +253,13 @@ async def ikm_chat_stream(req: ChatRequest):
                         except (json.JSONDecodeError, KeyError, IndexError):
                             continue
 
-        # Send sources at the end
         yield f"data: {json.dumps({'type': 'sources', 'sources': sources})}\n\n"
         yield f"data: {json.dumps({'type': 'done'})}\n\n"
 
     return StreamingResponse(stream_response(), media_type="text/event-stream")
 
 
-# --- Auditor API ---
+# --- Auditor/Chunk API ---
 
 @router.get("/api/ikm/chunks")
 async def list_chunks(
@@ -327,7 +329,6 @@ async def edit_chunk(chunk_id: int, data: dict):
 
     update_chunk(chunk_id, **data)
 
-    # Re-embed if already approved
     if chunk["status"] == "Approved" and "content" in data:
         upsert_chunk(
             chunk_id=f"chunk_{chunk_id}",
@@ -349,3 +350,43 @@ async def ingest_content(req: IngestRequest):
         department=req.department,
     )
     return {"status": "staged", "chunk_id": chunk_id}
+
+
+# --- Persona API ---
+
+@router.get("/api/ikm/personas")
+async def list_personas():
+    return get_personas()
+
+
+@router.get("/api/ikm/personas/{persona_id}")
+async def get_persona_detail(persona_id: int):
+    persona = get_persona(persona_id)
+    if not persona:
+        raise HTTPException(status_code=404, detail="Persona not found")
+    return persona
+
+
+@router.post("/api/ikm/personas")
+async def create_persona_endpoint(data: PersonaCreate):
+    persona_id = create_persona(
+        name=data.name,
+        role=data.role,
+        departments=data.departments,
+    )
+    return {"status": "created", "id": persona_id}
+
+
+@router.put("/api/ikm/personas/{persona_id}")
+async def update_persona_endpoint(persona_id: int, data: PersonaUpdate):
+    updates = {k: v for k, v in data.dict().items() if v is not None}
+    if not updates:
+        return {"status": "no changes"}
+    update_persona(persona_id, **updates)
+    return {"status": "updated", "id": persona_id}
+
+
+@router.delete("/api/ikm/personas/{persona_id}")
+async def delete_persona_endpoint(persona_id: int):
+    delete_persona(persona_id)
+    return {"status": "deleted", "id": persona_id}
