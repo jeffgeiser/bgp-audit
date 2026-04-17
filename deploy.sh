@@ -20,7 +20,9 @@ git pull origin "$BRANCH"
 
 # Stop existing containers
 echo "[2/4] Stopping containers..."
-docker-compose down
+docker-compose down --remove-orphans 2>/dev/null || true
+# Force remove named containers in case they were created outside this compose
+docker rm -f bgp_audit_app ikm_crawl4ai 2>/dev/null || true
 
 # Rebuild with no cache
 echo "[3/4] Rebuilding (no cache)..."
