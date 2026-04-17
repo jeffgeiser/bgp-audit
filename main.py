@@ -17,8 +17,8 @@ from fastapi.responses import HTMLResponse, JSONResponse, StreamingResponse
 from fastapi.templating import Jinja2Templates
 from typing import List, Dict, Any, Optional
 
-# root_path='/audit' ensures FastAPI generates correct internal URLs
-app = FastAPI(root_path="/audit")
+# root_path='/zenbrain' ensures FastAPI generates correct internal URLs
+app = FastAPI(root_path="/zenbrain")
 
 # Setup templates directory
 templates = Jinja2Templates(directory="templates")
@@ -586,8 +586,14 @@ async def initialize_footprint():
     await loop.run_in_executor(None, _initialize_footprint_sync)
 @app.get("/", response_class=HTMLResponse)
 @app.get("", response_class=HTMLResponse)
-async def dashboard_home(request: Request):
-    """Serve the main dashboard UI."""
+async def home(request: Request):
+    """Serve the IKM chat interface as the landing page."""
+    return templates.TemplateResponse("ikm_chat.html", {"request": request})
+
+# Legacy BGP Audit routes (kept at /bgp subpath)
+@app.get("/bgp", response_class=HTMLResponse)
+async def bgp_dashboard(request: Request):
+    """Serve the BGP audit dashboard."""
     config = zenlayer_state.get("config", {})
     return templates.TemplateResponse("index.html", {
         "request": request,
@@ -597,15 +603,10 @@ async def dashboard_home(request: Request):
         "metro_mapping": config.get("METRO_MAP", {})
     })
 
-@app.get("/settings", response_class=HTMLResponse)
+@app.get("/bgp/settings", response_class=HTMLResponse)
 async def settings_page(request: Request):
     """Serve the settings editor UI."""
     return templates.TemplateResponse("settings.html", {"request": request})
-
-@app.get("/routing", response_class=HTMLResponse)
-async def routing_page(request: Request):
-    """Serve the routing flow visualization UI."""
-    return templates.TemplateResponse("routing.html", {"request": request})
 @app.get("/api/settings")
 async def get_settings():
     """Return the current configuration plus all unique cities found in footprint."""
@@ -960,3 +961,11 @@ async def export_networks(
     except Exception as e:
         print(f"[API] Export error: {e}")
         raise HTTPException(status_code=500, detail=str(e))
+
+# --- IKM (Internal Knowledge MCP) ---
+try:
+    from ikm.router import router as ikm_router
+    app.include_router(ikm_router)
+    print("[IKM] Router loaded successfully")
+except ImportError as e:
+    print(f"[IKM] Router not loaded (missing dependency): {e}")
