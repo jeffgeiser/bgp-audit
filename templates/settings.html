@@ -33,7 +33,7 @@
                 <span class="text-[9px] font-bold text-white/40 uppercase tracking-[0.2em] mt-0.5 leading-none">BGP Explorer</span>
             </div>
         </div>
-        <a href="/audit" class="flex items-center space-x-2 bg-white/10 hover:bg-white/20 px-4 py-2 rounded-xl transition-all text-sm font-bold border border-white/10">
+        <a href="/zenbrain/bgp" class="flex items-center space-x-2 bg-white/10 hover:bg-white/20 px-4 py-2 rounded-xl transition-all text-sm font-bold border border-white/10">
             <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M3 12l2-2m0 0l7-7 7 7M5 10v10a1 1 0 001 1h3m10-11l2 2m-2-2v10a1 1 0 01-1 1h-3m-6 0a1 1 0 001-1v-4a1 1 0 011-1h2a1 1 0 011 1v4a1 1 0 001 1m-6 0h6" /></svg>
             <span>Back to Dashboard</span>
         </a>
@@ -115,7 +115,7 @@
 
                 async init() {
                     try {
-                        const res = await fetch('/audit/api/settings');
+                        const res = await fetch('/zenbrain/bgp/api/settings');
                         const data = await res.json();
                         this.rawJson = JSON.stringify(data, null, 4);
                     } catch (err) {
@@ -149,7 +149,7 @@
                     this.success = false;
 
                     try {
-                        const response = await fetch('/audit/api/settings', {
+                        const response = await fetch('/zenbrain/bgp/api/settings', {
                             method: 'POST',
                             headers: { 'Content-Type': 'application/json' },
                             body: this.rawJson
