@@ -4,30 +4,34 @@ FastAPI router for Zenlayer IKM.
 Provides:
 - /           → Chat interface (served by main.py root route)
 - /dash       → Auditor dashboard with persona system
-- /api/ikm/*  → API endpoints for chat and auditor actions
+- /api/ikm/*  → API endpoints for chat, auditor, ingest, sources
 """
 
 import os
 import sys
-from typing import Optional
+import tempfile
+from typing import Optional, List
 
-from fastapi import APIRouter, Request, HTTPException
+from fastapi import APIRouter, Request, HTTPException, UploadFile, File, Form
 from fastapi.responses import HTMLResponse, StreamingResponse
 from pydantic import BaseModel
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
 from shared import config
-from shared.db import init_db, get_chunks, get_chunk, update_chunk, insert_chunk, get_stats
+from shared.db import init_db, get_chunks, get_chunk, update_chunk, insert_chunk, get_stats, get_connection
 from shared.vectorstore import upsert_chunk, query_knowledge, get_collection_count
 from shared.gaps import log_gap
 from shared.personas import init_personas_db, get_personas, get_persona, create_persona, update_persona, delete_persona
+from shared.sources import init_sources_db, add_source, get_sources, get_source, update_source, delete_source, get_chunks_by_source
+from ingestion.ingest import chunk_markdown, ingest_markdown, crawl_url
 
 router = APIRouter()
 
 # Init databases on import
 init_db()
 init_personas_db()
+init_sources_db()
 
 
 # --- Pydantic models ---
@@ -350,6 +354,161 @@ async def ingest_content(req: IngestRequest):
         department=req.department,
     )
     return {"status": "staged", "chunk_id": chunk_id}
+
+
+# --- Ingest API (URL, file upload, text) ---
+
+@router.post("/api/ikm/ingest/url")
+async def ingest_url(
+    url: str = Form(...),
+    department: str = Form("General"),
+    ingested_by: str = Form("Unknown"),
+):
+    """Crawl a URL and stage its content."""
+    try:
+        markdown = await crawl_url(url)
+        if not markdown:
+            raise HTTPException(status_code=400, detail="Could not extract content from URL")
+
+        count = ingest_markdown(markdown, source=url, department=department)
+
+        source_id = add_source(
+            url_or_filename=url,
+            source_type="url",
+            department=department,
+            ingested_by=ingested_by,
+            chunk_count=count,
+        )
+
+        return {"status": "ingested", "source_id": source_id, "chunks": count}
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.post("/api/ikm/ingest/file")
+async def ingest_file(
+    file: UploadFile = File(...),
+    department: str = Form("General"),
+    ingested_by: str = Form("Unknown"),
+):
+    """Upload and process a file (PDF, MD, TXT)."""
+    ext = os.path.splitext(file.filename)[1].lower()
+    if ext not in (".pdf", ".md", ".txt"):
+        raise HTTPException(status_code=400, detail=f"Unsupported file type: {ext}")
+
+    try:
+        with tempfile.NamedTemporaryFile(delete=False, suffix=ext) as tmp:
+            content = await file.read()
+            tmp.write(content)
+            tmp_path = tmp.name
+
+        if ext == ".pdf":
+            try:
+                from docling.document_converter import DocumentConverter
+                converter = DocumentConverter()
+                result = converter.convert(tmp_path)
+                markdown = result.document.export_to_markdown()
+            except ImportError:
+                os.unlink(tmp_path)
+                raise HTTPException(status_code=500, detail="PDF processing not available (docling not installed)")
+        else:
+            markdown = content.decode("utf-8", errors="replace")
+
+        os.unlink(tmp_path)
+
+        if not markdown.strip():
+            raise HTTPException(status_code=400, detail="No content extracted from file")
+
+        count = ingest_markdown(markdown, source=file.filename, department=department)
+
+        source_id = add_source(
+            url_or_filename=file.filename,
+            source_type="file",
+            department=department,
+            ingested_by=ingested_by,
+            chunk_count=count,
+        )
+
+        return {"status": "ingested", "source_id": source_id, "chunks": count}
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.post("/api/ikm/ingest/text")
+async def ingest_text(
+    content: str = Form(...),
+    source_name: str = Form("Manual Entry"),
+    department: str = Form("General"),
+    ingested_by: str = Form("Unknown"),
+):
+    """Ingest raw text content."""
+    if not content.strip():
+        raise HTTPException(status_code=400, detail="Content is empty")
+
+    count = ingest_markdown(content, source=source_name, department=department)
+
+    source_id = add_source(
+        url_or_filename=source_name,
+        source_type="text",
+        department=department,
+        ingested_by=ingested_by,
+        chunk_count=count,
+    )
+
+    return {"status": "ingested", "source_id": source_id, "chunks": count}
+
+
+# --- Sources API ---
+
+@router.get("/api/ikm/sources")
+async def list_sources(
+    department: Optional[str] = None,
+    ingested_by: Optional[str] = None,
+):
+    return get_sources(department=department, ingested_by=ingested_by)
+
+
+@router.post("/api/ikm/sources/{source_id}/recrawl")
+async def recrawl_source(source_id: int, ingested_by: str = Form("Unknown")):
+    """Re-crawl a URL source and update its chunks."""
+    source = get_source(source_id)
+    if not source:
+        raise HTTPException(status_code=404, detail="Source not found")
+    if source["type"] != "url":
+        raise HTTPException(status_code=400, detail="Only URL sources can be re-crawled")
+
+    markdown = await crawl_url(source["url_or_filename"])
+    if not markdown:
+        raise HTTPException(status_code=400, detail="Could not extract content from URL")
+
+    count = ingest_markdown(markdown, source=source["url_or_filename"], department=source["department"])
+    update_source(source_id, chunk_count=source["chunk_count"] + count,
+                  last_crawled=__import__("datetime").datetime.now(__import__("datetime").timezone.utc).isoformat())
+
+    return {"status": "recrawled", "new_chunks": count}
+
+
+@router.delete("/api/ikm/sources/{source_id}")
+async def delete_source_endpoint(source_id: int):
+    """Soft-delete a source and optionally its chunks."""
+    source = get_source(source_id)
+    if not source:
+        raise HTTPException(status_code=404, detail="Source not found")
+
+    # Mark chunks from this source as Rejected
+    chunk_ids = get_chunks_by_source(source["url_or_filename"])
+    conn = get_connection()
+    for cid in chunk_ids:
+        conn.execute("UPDATE chunks SET status = 'Rejected' WHERE id = ?", (cid,))
+    conn.commit()
+    conn.close()
+
+    delete_source(source_id)
+    return {"status": "deleted", "chunks_removed": len(chunk_ids)}
 
 
 # --- Persona API ---
