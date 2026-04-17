@@ -1,39 +1,15 @@
-#!/bin/bash
-# deploy.sh — Pull latest changes and rebuild/restart the app
-# Usage: ./deploy.sh [branch]
-#   branch defaults to "main"
+#!/usr/bin/env bash
+set -euo pipefail
+COMPOSE_FILE="/var/www/dashboards/docker-compose.yml"
+SERVICE="bgp-audit"
 
-set -e
+cd "$(dirname "$0")"
+echo "==> Pulling latest..."
+git pull origin main
 
-BRANCH="${1:-main}"
-APP_DIR="/var/www/dashboards/bgp-audit"
+echo "==> Rebuilding $SERVICE..."
+docker compose -f "$COMPOSE_FILE" build "$SERVICE"
+docker compose -f "$COMPOSE_FILE" up -d --force-recreate "$SERVICE"
 
-echo "=== ZenBrain Deploy ==="
-echo "Branch: $BRANCH"
-echo ""
-
-cd "$APP_DIR"
-
-# Pull latest
-echo "[1/4] Pulling latest from origin/$BRANCH..."
-git pull origin "$BRANCH"
-
-# Stop existing containers
-echo "[2/4] Stopping containers..."
-docker-compose down --remove-orphans 2>/dev/null || true
-# Force remove named containers in case they were created outside this compose
-docker rm -f bgp_audit_app ikm_crawl4ai 2>/dev/null || true
-
-# Rebuild with no cache
-echo "[3/4] Rebuilding (no cache)..."
-docker-compose build --no-cache
-
-# Start
-echo "[4/4] Starting containers..."
-docker-compose up -d
-
-echo ""
-echo "=== Deploy complete ==="
-docker ps --filter "name=bgp_audit" --format "table {{.Names}}\t{{.Status}}\t{{.Ports}}"
-echo ""
-echo "Test: curl http://localhost:8001/"
+echo "==> Done."
+docker compose -f "$COMPOSE_FILE" logs "$SERVICE" --tail=20
