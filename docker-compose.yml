@@ -1,0 +1,16 @@
+services:
+  bgp-audit:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: bgp_audit_app
+    restart: unless-stopped
+    ports:
+      - "8000:8000"
+    volumes:
+      - bgp_audit_data:/app/data
+    environment:
+      - DATA_DIR=/app/data
+
+volumes:
+  bgp_audit_data:
