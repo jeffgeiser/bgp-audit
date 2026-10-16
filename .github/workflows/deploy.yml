@@ -32,6 +32,12 @@ jobs:
           tags: ghcr.io/jeffgeiser/bgp-audit:latest
 
       - name: Trigger Instant Watchtower Update
+        env:
+          WATCHTOWER_TOKEN: ${{ secrets.WATCHTOWER_TOKEN }}
         run: |
-          curl -H "Authorization: Bearer ***REMOVED***" \
+          if [ -z "$WATCHTOWER_TOKEN" ]; then
+            echo "::error::WATCHTOWER_TOKEN repository secret is not set"
+            exit 1
+          fi
+          curl -fsS -H "Authorization: Bearer $WATCHTOWER_TOKEN" \
                http://127.17.0.1:8080/v1/update

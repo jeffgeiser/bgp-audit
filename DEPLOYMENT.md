@@ -11,7 +11,7 @@ services:
   bgp-audit:
     # ... existing configuration ...
     environment:
-      - PEERINGDB_API_KEY=***REMOVED***
+      - PEERINGDB_API_KEY=<your-peeringdb-api-key>
       - PEERINGDB_DB_PATH=/app/data/peeringdb.sqlite3
     volumes:
       - ./bgp-audit/data:/app/data  # Persist PeeringDB database

@@ -23,19 +23,19 @@ Add the API key to your docker-compose.yml or pass it as an environment variable
 services:
   bgp-audit:
     environment:
-      - PEERINGDB_API_KEY=***REMOVED***
+      - PEERINGDB_API_KEY=<your-peeringdb-api-key>
 ```
 
 Or when running the container:
 
 ```bash
-docker run -e PEERINGDB_API_KEY=***REMOVED*** ...
+docker run -e PEERINGDB_API_KEY=<your-peeringdb-api-key> ...
 ```
 
 #### For Local Development
 
 ```bash
-export PEERINGDB_API_KEY=***REMOVED***
+export PEERINGDB_API_KEY=<your-peeringdb-api-key>
 export PEERINGDB_DB_PATH=/app/data/peeringdb.sqlite3
 python main.py
 ```
